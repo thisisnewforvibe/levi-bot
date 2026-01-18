@@ -1,0 +1,32 @@
+# Environment
+.env
+.env.local
+.env.*.local
+venv/
+__pycache__/
+*.pyc
+
+# Database (will be created on server)
+reminders.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Logs
+*.log
+bot.log
+
+# Google credentials (add manually to Railway)
+google-credentials.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Whisper models (will download on server if needed)
+*.pt
+
+# Levi app (separate deployment)
+levi-app/
