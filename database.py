@@ -146,18 +146,42 @@ async def get_pending_reminders(before_time: datetime) -> List[Tuple]:
     """
     async with aiosqlite.connect(DATABASE_PATH) as db:
         db.row_factory = aiosqlite.Row
-        cursor = await db.execute(
-            """
-            SELECT id, user_id, chat_id, task_text, notes, location, scheduled_time_utc, 
-                   user_timezone, initial_reminder_sent, follow_up_sent, recurrence_type, recurrence_time
-            FROM reminders
-            WHERE status = 'pending' AND scheduled_time_utc <= ?
-            ORDER BY scheduled_time_utc ASC
-            """,
-            (before_time.isoformat(),)
-        )
+        try:
+            # Try with new columns first
+            cursor = await db.execute(
+                """
+                SELECT id, user_id, chat_id, task_text, notes, location, scheduled_time_utc, 
+                       user_timezone, initial_reminder_sent, follow_up_sent, 
+                       recurrence_type, recurrence_time
+                FROM reminders
+                WHERE status = 'pending' AND scheduled_time_utc <= ?
+                ORDER BY scheduled_time_utc ASC
+                """,
+                (before_time.isoformat(),)
+            )
+        except Exception:
+            # Fallback to query without recurrence columns
+            cursor = await db.execute(
+                """
+                SELECT id, user_id, chat_id, task_text, notes, location, scheduled_time_utc, 
+                       user_timezone, initial_reminder_sent, follow_up_sent
+                FROM reminders
+                WHERE status = 'pending' AND scheduled_time_utc <= ?
+                ORDER BY scheduled_time_utc ASC
+                """,
+                (before_time.isoformat(),)
+            )
         rows = await cursor.fetchall()
-        return [dict(row) for row in rows]
+        # Convert to dict and add defaults for missing columns
+        result = []
+        for row in rows:
+            d = dict(row)
+            d.setdefault('recurrence_type', None)
+            d.setdefault('recurrence_time', None)
+            d.setdefault('notes', None)
+            d.setdefault('location', None)
+            result.append(d)
+        return result
 
 
 async def get_follow_up_reminders(follow_up_after: datetime) -> List[dict]:

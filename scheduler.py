@@ -35,8 +35,10 @@ async def check_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
         # Get all pending reminders that are due
         pending_reminders = await get_pending_reminders(now)
         
+        logger.debug(f"Found {len(pending_reminders)} pending reminders due")
+        
         for reminder in pending_reminders:
-            if reminder['initial_reminder_sent'] == 0:
+            if reminder.get('initial_reminder_sent', 0) == 0:
                 # This reminder hasn't been sent yet - send initial reminder
                 await send_reminder(context, reminder)
         
@@ -49,7 +51,7 @@ async def check_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
             await send_follow_up(context, reminder)
     
     except Exception as e:
-        logger.error(f"Error checking reminders: {e}")
+        logger.error(f"Error checking reminders: {e}", exc_info=True)
 
 
 async def send_reminder(context: ContextTypes.DEFAULT_TYPE, reminder: dict) -> None:
