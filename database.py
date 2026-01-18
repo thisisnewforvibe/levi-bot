@@ -39,6 +39,8 @@ def init_database() -> None:
             status TEXT DEFAULT 'pending',
             initial_reminder_sent INTEGER DEFAULT 0,
             follow_up_sent INTEGER DEFAULT 0,
+            recurrence_type TEXT DEFAULT NULL,
+            recurrence_time TEXT DEFAULT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
@@ -52,6 +54,17 @@ def init_database() -> None:
     
     try:
         cursor.execute("ALTER TABLE reminders ADD COLUMN location TEXT")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+    
+    # Migration: Add recurrence columns if they don't exist
+    try:
+        cursor.execute("ALTER TABLE reminders ADD COLUMN recurrence_type TEXT DEFAULT NULL")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+    
+    try:
+        cursor.execute("ALTER TABLE reminders ADD COLUMN recurrence_time TEXT DEFAULT NULL")
     except sqlite3.OperationalError:
         pass  # Column already exists
     
@@ -90,7 +103,9 @@ async def add_reminder(
     scheduled_time: datetime,
     user_timezone: str = 'UTC',
     notes: str = None,
-    location: str = None
+    location: str = None,
+    recurrence_type: str = None,
+    recurrence_time: str = None
 ) -> int:
     """
     Add a new reminder to the database.
@@ -104,6 +119,8 @@ async def add_reminder(
         user_timezone: User's timezone
         notes: Additional details/items (e.g., shopping list)
         location: Where the task should be done
+        recurrence_type: 'daily', 'weekly', 'weekdays', 'monthly', or None
+        recurrence_time: Time in HH:MM format for recurring reminders
     
     Returns:
         The ID of the newly created reminder.
@@ -111,10 +128,10 @@ async def add_reminder(
     async with aiosqlite.connect(DATABASE_PATH) as db:
         cursor = await db.execute(
             """
-            INSERT INTO reminders (user_id, chat_id, task_text, notes, location, scheduled_time_utc, user_timezone, initial_reminder_sent, follow_up_sent)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0)
+            INSERT INTO reminders (user_id, chat_id, task_text, notes, location, scheduled_time_utc, user_timezone, recurrence_type, recurrence_time, initial_reminder_sent, follow_up_sent)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0)
             """,
-            (user_id, chat_id, task_text, notes, location, scheduled_time.isoformat(), user_timezone)
+            (user_id, chat_id, task_text, notes, location, scheduled_time.isoformat(), user_timezone, recurrence_type, recurrence_time)
         )
         await db.commit()
         return cursor.lastrowid
@@ -132,7 +149,7 @@ async def get_pending_reminders(before_time: datetime) -> List[Tuple]:
         cursor = await db.execute(
             """
             SELECT id, user_id, chat_id, task_text, notes, location, scheduled_time_utc, 
-                   user_timezone, initial_reminder_sent, follow_up_sent
+                   user_timezone, initial_reminder_sent, follow_up_sent, recurrence_type, recurrence_time
             FROM reminders
             WHERE status = 'pending' AND scheduled_time_utc <= ?
             ORDER BY scheduled_time_utc ASC
@@ -146,6 +163,7 @@ async def get_pending_reminders(before_time: datetime) -> List[Tuple]:
 async def get_follow_up_reminders(follow_up_after: datetime) -> List[dict]:
     """
     Get reminders that need a follow-up (30 minutes after initial reminder).
+    Only for non-recurring reminders (recurring ones don't need follow-up).
     
     Returns:
         List of reminder dictionaries needing follow-up.
@@ -154,11 +172,12 @@ async def get_follow_up_reminders(follow_up_after: datetime) -> List[dict]:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute(
             """
-            SELECT id, user_id, chat_id, task_text, notes, location, scheduled_time_utc, user_timezone
+            SELECT id, user_id, chat_id, task_text, notes, location, scheduled_time_utc, user_timezone, recurrence_type
             FROM reminders
             WHERE status = 'pending' 
             AND initial_reminder_sent = 1
             AND follow_up_sent = 0
+            AND recurrence_type IS NULL
             AND scheduled_time_utc <= ?
             ORDER BY scheduled_time_utc ASC
             """,
@@ -276,7 +295,7 @@ async def get_user_reminders(user_id: int, status: Optional[str] = None) -> List
         if status:
             cursor = await db.execute(
                 """
-                SELECT id, task_text, notes, location, scheduled_time_utc, user_timezone, status, created_at
+                SELECT id, task_text, notes, location, scheduled_time_utc, user_timezone, status, recurrence_type, recurrence_time, created_at
                 FROM reminders
                 WHERE user_id = ? AND status = ?
                 ORDER BY scheduled_time_utc ASC
@@ -286,7 +305,7 @@ async def get_user_reminders(user_id: int, status: Optional[str] = None) -> List
         else:
             cursor = await db.execute(
                 """
-                SELECT id, task_text, notes, location, scheduled_time_utc, user_timezone, status, created_at
+                SELECT id, task_text, notes, location, scheduled_time_utc, user_timezone, status, recurrence_type, recurrence_time, created_at
                 FROM reminders
                 WHERE user_id = ?
                 ORDER BY scheduled_time_utc ASC
@@ -462,7 +481,7 @@ async def get_all_pending_reminders() -> List[dict]:
         cursor = await db.execute(
             """
             SELECT id, user_id, chat_id, task_text, notes, location, scheduled_time_utc, 
-                   user_timezone, follow_up_sent, status
+                   user_timezone, follow_up_sent, status, recurrence_type, recurrence_time
             FROM reminders
             WHERE status = 'pending'
             ORDER BY scheduled_time_utc ASC
@@ -470,3 +489,81 @@ async def get_all_pending_reminders() -> List[dict]:
         )
         rows = await cursor.fetchall()
         return [dict(row) for row in rows]
+
+
+async def schedule_next_recurrence(reminder: dict) -> Optional[int]:
+    """
+    Schedule the next occurrence of a recurring reminder.
+    
+    Args:
+        reminder: The reminder dict with recurrence info
+        
+    Returns:
+        The new reminder ID, or None if not recurring
+    """
+    from dateutil import tz as tz_module
+    
+    recurrence_type = reminder.get('recurrence_type')
+    if not recurrence_type:
+        return None
+    
+    recurrence_time = reminder.get('recurrence_time', '09:00')
+    user_tz = reminder.get('user_timezone', 'Asia/Tashkent')
+    
+    # Parse the recurrence time
+    try:
+        hour, minute = map(int, recurrence_time.split(':'))
+    except:
+        hour, minute = 9, 0
+    
+    # Get current time in user's timezone
+    user_timezone = tz_module.gettz(user_tz)
+    now_local = datetime.now(user_timezone)
+    
+    # Calculate next occurrence based on recurrence type
+    if recurrence_type == 'daily':
+        # Tomorrow at the same time
+        next_date = now_local + timedelta(days=1)
+    elif recurrence_type == 'weekdays':
+        # Next weekday (Mon-Fri)
+        next_date = now_local + timedelta(days=1)
+        while next_date.weekday() >= 5:  # Skip Saturday (5) and Sunday (6)
+            next_date += timedelta(days=1)
+    elif recurrence_type == 'weekly':
+        # Same day next week
+        next_date = now_local + timedelta(weeks=1)
+    elif recurrence_type == 'monthly':
+        # Same day next month
+        next_month = now_local.month + 1
+        next_year = now_local.year
+        if next_month > 12:
+            next_month = 1
+            next_year += 1
+        try:
+            next_date = now_local.replace(year=next_year, month=next_month)
+        except ValueError:
+            # Handle edge case for months with different days
+            next_date = now_local.replace(year=next_year, month=next_month, day=28)
+    else:
+        return None
+    
+    # Set the time
+    next_datetime_local = next_date.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    
+    # Convert to UTC
+    next_datetime_utc = next_datetime_local.astimezone(tz_module.UTC).replace(tzinfo=None)
+    
+    # Create new reminder
+    new_id = await add_reminder(
+        user_id=reminder['user_id'],
+        chat_id=reminder['chat_id'],
+        task_text=reminder['task_text'],
+        scheduled_time=next_datetime_utc,
+        user_timezone=user_tz,
+        notes=reminder.get('notes'),
+        location=reminder.get('location'),
+        recurrence_type=recurrence_type,
+        recurrence_time=recurrence_time
+    )
+    
+    return new_id

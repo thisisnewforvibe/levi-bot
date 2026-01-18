@@ -46,7 +46,7 @@ async def parse_with_gemini(
         now_utc = datetime.utcnow()
         
         # Create a prompt for Gemini
-        prompt = f"""You are a smart reminder assistant for Uzbekistan users. Parse the following text and extract reminder tasks with their scheduled times, additional notes/details, and locations.
+        prompt = f"""You are a smart reminder assistant for Uzbekistan users. Parse the following text and extract reminder tasks with their scheduled times, additional notes/details, locations, and recurrence patterns.
 
 Current date and time (UTC): {now_utc.strftime('%Y-%m-%d %H:%M')}
 User timezone: {user_timezone}
@@ -55,15 +55,24 @@ User language: {language or 'uz/ru'}
 Text: "{text}"
 
 Extract ALL reminders from this text. For each reminder, determine:
-1. The task description (main action - what to do, keep it short like "Do'konga borish" or "Magazinga borish")
-2. The scheduled time in ISO format (YYYY-MM-DD HH:MM in UTC)
+1. The task description (main action - what to do, keep it short like "Dori ichish" or "Magazinga borish")
+2. The scheduled time in ISO format (YYYY-MM-DD HH:MM in UTC) - for recurring reminders, use the FIRST occurrence
 3. Notes/details (items to buy, things to remember, list of items - extracted from the message)
 4. Location (where to do it, if mentioned)
+5. Recurrence type (if the reminder should repeat)
+6. Recurrence time (the time of day for recurring reminders in HH:MM format, in USER's timezone)
+
+RECURRENCE DETECTION RULES:
+- "har kuni" / "каждый день" / "ежедневно" = recurrence_type: "daily"
+- "har hafta" / "каждую неделю" / "еженедельно" = recurrence_type: "weekly"  
+- "har oy" / "каждый месяц" / "ежемесячно" = recurrence_type: "monthly"
+- "ish kunlari" / "har ish kuni" / "по будням" / "в рабочие дни" = recurrence_type: "weekdays"
+- If NO recurrence pattern is detected, set recurrence_type to null
 
 IMPORTANT EXTRACTION RULES:
+- If user says "har kuni ertalab 9 da dori ichish" - task is "Dori ichish", recurrence_type is "daily", recurrence_time is "09:00"
+- If user says "har hafta dushanba 10 da uchrashish" - task is "Uchrashish", recurrence_type is "weekly", recurrence_time is "10:00"
 - If user says "magazinga borib olma, non, go'sht olish" - the task is "Magazinga borish", notes are "olma, non, go'sht", location is "magazin"
-- If user says "do'konga borib sut, non olish kerak" - task is "Do'konga borish", notes are "sut, non", location is "do'kon"
-- If user says "supermarketga borib oziq-ovqat olish: kartoshka, sabzi, piyoz" - task is "Oziq-ovqat olish", notes are "kartoshka, sabzi, piyoz", location is "supermarket"
 - For shopping lists, extract ALL items mentioned as notes
 - Keep task short and action-oriented
 - Notes should contain details, items, or specifications
@@ -79,7 +88,7 @@ CRITICAL: If text contains "X minut" or "X daqiqa" patterns, ALWAYS interpret as
 - "ertaga" / "ertangi kun" = tomorrow at 9:00 AM
 - "bugun" / "shu kun" = today
 - "kechqurun" / "oqshom" = today at 6:00 PM
-- "ertalab" / "tongda" = tomorrow at 8:00 AM
+- "ertalab" / "tongda" = 8:00 AM (or 9:00 if "ertalab 9 da")
 - "tushlikda" / "peshindan keyin" = today at 1:00 PM
 - "завтра" / "завтра утром" = tomorrow morning (9 AM)
 - "сегодня вечером" / "вечером" = today evening (6 PM)
@@ -107,8 +116,8 @@ Location words to recognize:
 
 Return ONLY a JSON array with this exact format:
 [
-  {{"task": "short task description", "time_utc": "2026-01-16 16:30", "notes": "item1, item2, item3", "location": "place name"}},
-  {{"task": "another task", "time_utc": "2026-01-17 09:00", "notes": null, "location": null}}
+  {{"task": "short task description", "time_utc": "2026-01-16 16:30", "notes": "item1, item2, item3", "location": "place name", "recurrence_type": "daily", "recurrence_time": "09:00"}},
+  {{"task": "another task", "time_utc": "2026-01-17 09:00", "notes": null, "location": null, "recurrence_type": null, "recurrence_time": null}}
 ]
 
 If the text is not a reminder or makes no sense, return an empty array: []
@@ -141,6 +150,8 @@ If the text is not a reminder or makes no sense, return an empty array: []
             time_str = reminder['time_utc']
             notes = reminder.get('notes')
             location = reminder.get('location')
+            recurrence_type = reminder.get('recurrence_type')
+            recurrence_time = reminder.get('recurrence_time')
             
             try:
                 # Parse the UTC time string
@@ -152,9 +163,11 @@ If the text is not a reminder or makes no sense, return an empty array: []
                         "task": task,
                         "time": scheduled_time,
                         "notes": notes,
-                        "location": location
+                        "location": location,
+                        "recurrence_type": recurrence_type,
+                        "recurrence_time": recurrence_time
                     })
-                    logger.info(f"Gemini parsed: task='{task}', time={scheduled_time}, notes='{notes}', location='{location}'")
+                    logger.info(f"Gemini parsed: task='{task}', time={scheduled_time}, notes='{notes}', location='{location}', recurrence='{recurrence_type}' at '{recurrence_time}'")
                 else:
                     logger.warning(f"Gemini returned past time: {time_str}")
             except ValueError as e:

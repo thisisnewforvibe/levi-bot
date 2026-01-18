@@ -195,7 +195,16 @@ async def list_reminders_command(update: Update, context: ContextTypes.DEFAULT_T
         scheduled = datetime.fromisoformat(reminder['scheduled_time_utc'])
         formatted_time = format_datetime(scheduled, user_tz)
         
-        message += f"**#{reminder['id']}** - {reminder['task_text']}\n"
+        # Show recurrence indicator
+        recurrence_icons = {
+            'daily': '🔄',
+            'weekly': '📅',
+            'weekdays': '💼',
+            'monthly': '📆'
+        }
+        recurrence_icon = recurrence_icons.get(reminder.get('recurrence_type'), '')
+        
+        message += f"**#{reminder['id']}** {recurrence_icon} {reminder['task_text']}\n"
         
         # Show location if available
         if reminder.get('location'):
@@ -204,6 +213,19 @@ async def list_reminders_command(update: Update, context: ContextTypes.DEFAULT_T
         # Show notes if available
         if reminder.get('notes'):
             message += f"   📋 {reminder['notes']}\n"
+        
+        # Show recurrence info
+        if reminder.get('recurrence_type'):
+            recurrence_labels = {
+                'daily': 'Har kuni',
+                'weekly': 'Har hafta',
+                'weekdays': 'Ish kunlari',
+                'monthly': 'Har oy'
+            }
+            message += f"   🔄 {recurrence_labels.get(reminder['recurrence_type'], 'Takroriy')}"
+            if reminder.get('recurrence_time'):
+                message += f" soat {reminder['recurrence_time']} da"
+            message += "\n"
         
         message += f"   ⏰ {formatted_time}\n\n"
     
@@ -454,9 +476,11 @@ async def voice_message_handler(update: Update, context: ContextTypes.DEFAULT_TY
             return await handle_multiple_tasks(update, context, tasks, user_tz, detected_lang)
         
         # Step 3: Parse the reminder text and time
-        # Initialize notes and location
+        # Initialize notes, location, and recurrence
         notes = None
         location = None
+        recurrence_type = None
+        recurrence_time = None
         
         # Choose parsing strategy based on configuration
         if ALWAYS_USE_GEMINI:
@@ -479,7 +503,9 @@ async def voice_message_handler(update: Update, context: ContextTypes.DEFAULT_TY
                 scheduled_time = result["time"]
                 notes = result.get("notes")
                 location = result.get("location")
-                logger.info(f"Gemini parsed: {task_text} at {scheduled_time}, notes={notes}, location={location}")
+                recurrence_type = result.get("recurrence_type")
+                recurrence_time = result.get("recurrence_time")
+                logger.info(f"Gemini parsed: {task_text} at {scheduled_time}, notes={notes}, location={location}, recurrence={recurrence_type}")
             else:
                 # Fallback to regex if Gemini fails
                 task_text, scheduled_time = parse_reminder_text(
@@ -516,13 +542,17 @@ async def voice_message_handler(update: Update, context: ContextTypes.DEFAULT_TY
                     scheduled_time = result["time"]
                     notes = result.get("notes")
                     location = result.get("location")
-                    logger.info(f"Gemini successfully parsed: {task_text} at {scheduled_time}, notes={notes}, location={location}")
+                    recurrence_type = result.get("recurrence_type")
+                    recurrence_time = result.get("recurrence_time")
+                    logger.info(f"Gemini successfully parsed: {task_text} at {scheduled_time}, notes={notes}, location={location}, recurrence={recurrence_type}")
         
         # Store transcription in context for potential re-use
         context.user_data['last_transcription'] = transcription
         context.user_data['task_text'] = task_text
         context.user_data['notes'] = notes
         context.user_data['location'] = location
+        context.user_data['recurrence_type'] = recurrence_type
+        context.user_data['recurrence_time'] = recurrence_time
         context.user_data['user_timezone'] = user_tz
         context.user_data['detected_language'] = detected_lang
         
@@ -547,17 +577,32 @@ async def voice_message_handler(update: Update, context: ContextTypes.DEFAULT_TY
             scheduled_time=scheduled_time,
             user_timezone=user_tz,
             notes=notes,
-            location=location
+            location=location,
+            recurrence_type=recurrence_type,
+            recurrence_time=recurrence_time
         )
         
         formatted_time = format_datetime(scheduled_time, user_tz)
         
-        # Build confirmation message with notes and location
-        confirmation_msg = (
-            f"✅ **Eslatma yaratildi!**\n"
-            f"**Напоминание создано!**\n\n"
-            f"📝 {task_text}\n"
-        )
+        # Build confirmation message with notes, location, and recurrence
+        if recurrence_type:
+            recurrence_labels = {
+                'daily': '🔄 Har kuni / Ежедневно',
+                'weekly': '🔄 Har hafta / Еженедельно',
+                'weekdays': '🔄 Ish kunlari / По будням',
+                'monthly': '🔄 Har oy / Ежемесячно'
+            }
+            confirmation_msg = (
+                f"✅ **Doimiy eslatma yaratildi!**\n"
+                f"**Повторяющееся напоминание создано!**\n\n"
+                f"📝 {task_text}\n"
+            )
+        else:
+            confirmation_msg = (
+                f"✅ **Eslatma yaratildi!**\n"
+                f"**Напоминание создано!**\n\n"
+                f"📝 {task_text}\n"
+            )
         
         if location:
             confirmation_msg += f"📍 {location}\n"
@@ -565,15 +610,29 @@ async def voice_message_handler(update: Update, context: ContextTypes.DEFAULT_TY
         if notes:
             confirmation_msg += f"📋 {notes}\n"
         
+        if recurrence_type:
+            confirmation_msg += f"\n{recurrence_labels.get(recurrence_type, '🔄 Takroriy')}\n"
+            if recurrence_time:
+                confirmation_msg += f"⏰ Soat {recurrence_time} da\n"
+        
         confirmation_msg += (
-            f"\n⏰ {formatted_time}\n\n"
-            f"_Belgilangan vaqtda eslataman._\n"
-            f"_Напомню в указанное время._"
+            f"\n⏰ Birinchi eslatma: {formatted_time}\n" if recurrence_type else f"\n⏰ {formatted_time}\n"
         )
+        
+        if recurrence_type:
+            confirmation_msg += (
+                f"\n_Har safar eslataman._\n"
+                f"_Буду напоминать регулярно._"
+            )
+        else:
+            confirmation_msg += (
+                f"\n_Belgilangan vaqtda eslataman._\n"
+                f"_Напомню в указанное время._"
+            )
         
         await update.message.reply_text(confirmation_msg, parse_mode='Markdown')
         
-        logger.info(f"Created reminder {reminder_id} for user {user_id}: {task_text}, notes={notes}, location={location}")
+        logger.info(f"Created reminder {reminder_id} for user {user_id}: {task_text}, notes={notes}, location={location}, recurrence={recurrence_type}")
         return ConversationHandler.END
     
     except AudioTooShortError as e:

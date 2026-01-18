@@ -16,6 +16,7 @@ from database import (
     mark_follow_up_sent,
     update_reminder_status,
     get_all_pending_reminders,
+    schedule_next_recurrence,
 )
 from config import FOLLOW_UP_DELAY_SECONDS
 from time_parser import format_datetime
@@ -40,6 +41,7 @@ async def check_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
                 await send_reminder(context, reminder)
         
         # Check for follow-ups (reminders sent more than 30 minutes ago)
+        # Note: Follow-ups are only for non-recurring reminders
         follow_up_threshold = now - timedelta(seconds=FOLLOW_UP_DELAY_SECONDS)
         follow_up_reminders = await get_follow_up_reminders(follow_up_threshold)
         
@@ -62,12 +64,26 @@ async def send_reminder(context: ContextTypes.DEFAULT_TYPE, reminder: dict) -> N
         user_tz = reminder.get('user_timezone', 'Asia/Tashkent')
         scheduled_time = datetime.fromisoformat(reminder['scheduled_time_utc'])
         formatted_time = format_datetime(scheduled_time, user_tz)
+        is_recurring = reminder.get('recurrence_type') is not None
         
         # Build message with notes and location
-        message = (
-            f"🔔 **Eslatma!** / **Напоминание!**\n\n"
-            f"📝 {reminder['task_text']}\n"
-        )
+        if is_recurring:
+            recurrence_labels = {
+                'daily': '🔄 Kunlik',
+                'weekly': '🔄 Haftalik',
+                'weekdays': '🔄 Ish kunlari',
+                'monthly': '🔄 Oylik'
+            }
+            recurrence_label = recurrence_labels.get(reminder['recurrence_type'], '🔄')
+            message = (
+                f"🔔 **{recurrence_label} eslatma!**\n\n"
+                f"📝 {reminder['task_text']}\n"
+            )
+        else:
+            message = (
+                f"🔔 **Eslatma!** / **Напоминание!**\n\n"
+                f"📝 {reminder['task_text']}\n"
+            )
         
         # Add location if present
         if reminder.get('location'):
@@ -85,11 +101,19 @@ async def send_reminder(context: ContextTypes.DEFAULT_TYPE, reminder: dict) -> N
             parse_mode='Markdown'
         )
         
-        # Mark that initial reminder has been sent (NOT follow-up)
-        # This allows the follow-up to be sent 30 minutes later
-        await mark_initial_reminder_sent(reminder['id'])
+        # For recurring reminders, schedule the next occurrence and mark this one as done
+        if is_recurring:
+            new_id = await schedule_next_recurrence(reminder)
+            if new_id:
+                logger.info(f"Scheduled next recurrence {new_id} for recurring reminder {reminder['id']}")
+            # Mark the current reminder as completed
+            await update_reminder_status(reminder['id'], 'completed')
+        else:
+            # Mark that initial reminder has been sent (NOT follow-up)
+            # This allows the follow-up to be sent 30 minutes later
+            await mark_initial_reminder_sent(reminder['id'])
         
-        logger.info(f"Sent reminder {reminder['id']} to user {reminder['user_id']}")
+        logger.info(f"Sent reminder {reminder['id']} to user {reminder['user_id']}{' (recurring)' if is_recurring else ''}")
         
     except Exception as e:
         logger.error(f"Failed to send reminder {reminder['id']}: {e}")
