@@ -35,11 +35,13 @@ async def check_reminders(context: ContextTypes.DEFAULT_TYPE) -> None:
         # Get all pending reminders that are due
         pending_reminders = await get_pending_reminders(now)
         
-        logger.debug(f"Found {len(pending_reminders)} pending reminders due")
+        if pending_reminders:
+            logger.info(f"Found {len(pending_reminders)} pending reminders due at {now.isoformat()}")
         
         for reminder in pending_reminders:
             if reminder.get('initial_reminder_sent', 0) == 0:
                 # This reminder hasn't been sent yet - send initial reminder
+                logger.info(f"Sending reminder {reminder['id']}: {reminder['task_text']}")
                 await send_reminder(context, reminder)
         
         # Check for follow-ups (reminders sent more than 30 minutes ago)
