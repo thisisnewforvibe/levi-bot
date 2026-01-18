@@ -63,11 +63,21 @@ async def send_reminder(context: ContextTypes.DEFAULT_TYPE, reminder: dict) -> N
         scheduled_time = datetime.fromisoformat(reminder['scheduled_time_utc'])
         formatted_time = format_datetime(scheduled_time, user_tz)
         
+        # Build message with notes and location
         message = (
             f"🔔 **Eslatma!** / **Напоминание!**\n\n"
-            f"📝 {reminder['task_text']}\n\n"
-            f"⏰ _{formatted_time}_"
+            f"📝 {reminder['task_text']}\n"
         )
+        
+        # Add location if present
+        if reminder.get('location'):
+            message += f"📍 **Joy:** {reminder['location']}\n"
+        
+        # Add notes/items if present
+        if reminder.get('notes'):
+            message += f"\n📋 **Eslatma:**\n{reminder['notes']}\n"
+        
+        message += f"\n⏰ _{formatted_time}_"
         
         await context.bot.send_message(
             chat_id=reminder['chat_id'],
@@ -94,11 +104,20 @@ async def send_follow_up(context: ContextTypes.DEFAULT_TYPE, reminder: dict) -> 
         reminder: The reminder dictionary from database.
     """
     try:
+        # Build message with notes
         message = (
             f"⏰ **Vazifa bajarildimi?**\n"
             f"**Задача выполнена?**\n\n"
             f"📝 {reminder['task_text']}"
         )
+        
+        # Add location if present
+        if reminder.get('location'):
+            message += f"\n📍 {reminder['location']}"
+        
+        # Add notes if present
+        if reminder.get('notes'):
+            message += f"\n📋 {reminder['notes']}"
         
         # Create inline keyboard with YES/NO buttons
         keyboard = [

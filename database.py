@@ -32,6 +32,8 @@ def init_database() -> None:
             user_id INTEGER NOT NULL,
             chat_id INTEGER NOT NULL,
             task_text TEXT NOT NULL,
+            notes TEXT,
+            location TEXT,
             scheduled_time_utc TIMESTAMP NOT NULL,
             user_timezone TEXT DEFAULT 'UTC',
             status TEXT DEFAULT 'pending',
@@ -41,6 +43,17 @@ def init_database() -> None:
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    
+    # Migration: Add notes and location columns if they don't exist
+    try:
+        cursor.execute("ALTER TABLE reminders ADD COLUMN notes TEXT")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+    
+    try:
+        cursor.execute("ALTER TABLE reminders ADD COLUMN location TEXT")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
     
     # Rate limiting table
     cursor.execute("""
@@ -75,11 +88,22 @@ async def add_reminder(
     chat_id: int,
     task_text: str,
     scheduled_time: datetime,
-    user_timezone: str = 'UTC'
+    user_timezone: str = 'UTC',
+    notes: str = None,
+    location: str = None
 ) -> int:
     """
     Add a new reminder to the database.
     Times are stored in UTC.
+    
+    Args:
+        user_id: Telegram user ID
+        chat_id: Telegram chat ID
+        task_text: Main task description
+        scheduled_time: When to remind (UTC)
+        user_timezone: User's timezone
+        notes: Additional details/items (e.g., shopping list)
+        location: Where the task should be done
     
     Returns:
         The ID of the newly created reminder.
@@ -87,10 +111,10 @@ async def add_reminder(
     async with aiosqlite.connect(DATABASE_PATH) as db:
         cursor = await db.execute(
             """
-            INSERT INTO reminders (user_id, chat_id, task_text, scheduled_time_utc, user_timezone, initial_reminder_sent, follow_up_sent)
-            VALUES (?, ?, ?, ?, ?, 0, 0)
+            INSERT INTO reminders (user_id, chat_id, task_text, notes, location, scheduled_time_utc, user_timezone, initial_reminder_sent, follow_up_sent)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0)
             """,
-            (user_id, chat_id, task_text, scheduled_time.isoformat(), user_timezone)
+            (user_id, chat_id, task_text, notes, location, scheduled_time.isoformat(), user_timezone)
         )
         await db.commit()
         return cursor.lastrowid
@@ -107,7 +131,7 @@ async def get_pending_reminders(before_time: datetime) -> List[Tuple]:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute(
             """
-            SELECT id, user_id, chat_id, task_text, scheduled_time_utc, 
+            SELECT id, user_id, chat_id, task_text, notes, location, scheduled_time_utc, 
                    user_timezone, initial_reminder_sent, follow_up_sent
             FROM reminders
             WHERE status = 'pending' AND scheduled_time_utc <= ?
@@ -130,7 +154,7 @@ async def get_follow_up_reminders(follow_up_after: datetime) -> List[dict]:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute(
             """
-            SELECT id, user_id, chat_id, task_text, scheduled_time_utc, user_timezone
+            SELECT id, user_id, chat_id, task_text, notes, location, scheduled_time_utc, user_timezone
             FROM reminders
             WHERE status = 'pending' 
             AND initial_reminder_sent = 1
@@ -252,7 +276,7 @@ async def get_user_reminders(user_id: int, status: Optional[str] = None) -> List
         if status:
             cursor = await db.execute(
                 """
-                SELECT id, task_text, scheduled_time_utc, user_timezone, status, created_at
+                SELECT id, task_text, notes, location, scheduled_time_utc, user_timezone, status, created_at
                 FROM reminders
                 WHERE user_id = ? AND status = ?
                 ORDER BY scheduled_time_utc ASC
@@ -262,7 +286,7 @@ async def get_user_reminders(user_id: int, status: Optional[str] = None) -> List
         else:
             cursor = await db.execute(
                 """
-                SELECT id, task_text, scheduled_time_utc, user_timezone, status, created_at
+                SELECT id, task_text, notes, location, scheduled_time_utc, user_timezone, status, created_at
                 FROM reminders
                 WHERE user_id = ?
                 ORDER BY scheduled_time_utc ASC
@@ -437,7 +461,7 @@ async def get_all_pending_reminders() -> List[dict]:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute(
             """
-            SELECT id, user_id, chat_id, task_text, scheduled_time_utc, 
+            SELECT id, user_id, chat_id, task_text, notes, location, scheduled_time_utc, 
                    user_timezone, follow_up_sent, status
             FROM reminders
             WHERE status = 'pending'

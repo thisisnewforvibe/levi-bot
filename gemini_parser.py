@@ -6,7 +6,7 @@ Uses Google's Gemini model for natural language understanding.
 import logging
 import json
 from datetime import datetime, timedelta
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Dict, Any
 import google.generativeai as genai
 from config import GEMINI_API_KEY, DEFAULT_TIMEZONE
 
@@ -25,9 +25,9 @@ async def parse_with_gemini(
     text: str,
     user_timezone: str = DEFAULT_TIMEZONE,
     language: Optional[str] = None
-) -> List[Tuple[str, Optional[datetime]]]:
+) -> List[Dict[str, Any]]:
     """
-    Use Gemini AI to intelligently parse reminder text into tasks and times.
+    Use Gemini AI to intelligently parse reminder text into tasks, times, notes, and locations.
     
     Args:
         text: The transcribed text from voice message.
@@ -35,7 +35,7 @@ async def parse_with_gemini(
         language: Detected language (uz, ru).
     
     Returns:
-        List of tuples: [(task_text, scheduled_datetime_utc), ...]
+        List of dicts: [{"task": str, "time": datetime, "notes": str, "location": str}, ...]
     """
     if not model:
         logger.warning("Gemini API key not configured, skipping AI parsing")
@@ -46,7 +46,7 @@ async def parse_with_gemini(
         now_utc = datetime.utcnow()
         
         # Create a prompt for Gemini
-        prompt = f"""You are a smart reminder assistant for Uzbekistan users. Parse the following text and extract reminder tasks with their scheduled times.
+        prompt = f"""You are a smart reminder assistant for Uzbekistan users. Parse the following text and extract reminder tasks with their scheduled times, additional notes/details, and locations.
 
 Current date and time (UTC): {now_utc.strftime('%Y-%m-%d %H:%M')}
 User timezone: {user_timezone}
@@ -55,8 +55,18 @@ User language: {language or 'uz/ru'}
 Text: "{text}"
 
 Extract ALL reminders from this text. For each reminder, determine:
-1. The task description (what to do)
+1. The task description (main action - what to do, keep it short like "Do'konga borish" or "Magazinga borish")
 2. The scheduled time in ISO format (YYYY-MM-DD HH:MM in UTC)
+3. Notes/details (items to buy, things to remember, list of items - extracted from the message)
+4. Location (where to do it, if mentioned)
+
+IMPORTANT EXTRACTION RULES:
+- If user says "magazinga borib olma, non, go'sht olish" - the task is "Magazinga borish", notes are "olma, non, go'sht", location is "magazin"
+- If user says "do'konga borib sut, non olish kerak" - task is "Do'konga borish", notes are "sut, non", location is "do'kon"
+- If user says "supermarketga borib oziq-ovqat olish: kartoshka, sabzi, piyoz" - task is "Oziq-ovqat olish", notes are "kartoshka, sabzi, piyoz", location is "supermarket"
+- For shopping lists, extract ALL items mentioned as notes
+- Keep task short and action-oriented
+- Notes should contain details, items, or specifications
 
 Time parsing rules (including slang & colloquialisms):
 CRITICAL: If text contains "X minut" or "X daqiqa" patterns, ALWAYS interpret as "in X minutes from now":
@@ -86,18 +96,19 @@ Common slang expressions:
 - "kechasi" / "ночью" = tonight at 10:00 PM
 - "yangi yilda" / "новый год" = January 1st at 12:00 AM
 
-Task slang & informal words:
-- "qo'ng'iroq qil" / "звони" / "позвони" = call
-- "xabar qil" / "напиши" / "сообщи" = message/text
-- "chiqish" / "выйти" / "пойти" = go out
-- "uchrashish" / "встреча" / "встретиться" = meet
-- "ovqat" / "еда" / "покушать" / "поесть" = eat
-- "uxlash" / "спать" / "лечь спать" = sleep
+Location words to recognize:
+- "magazin" / "do'kon" / "supermarket" / "bozor" = shopping places
+- "uy" / "hovli" = home
+- "ish" / "ofis" = work/office
+- "maktab" / "universitet" = school/university
+- "shifoxona" / "kasalxona" / "klinika" = hospital/clinic
+- "apteka" / "dorixona" = pharmacy
+- "bank" = bank
 
 Return ONLY a JSON array with this exact format:
 [
-  {{"task": "task description", "time_utc": "2026-01-16 16:30"}},
-  {{"task": "another task", "time_utc": "2026-01-17 09:00"}}
+  {{"task": "short task description", "time_utc": "2026-01-16 16:30", "notes": "item1, item2, item3", "location": "place name"}},
+  {{"task": "another task", "time_utc": "2026-01-17 09:00", "notes": null, "location": null}}
 ]
 
 If the text is not a reminder or makes no sense, return an empty array: []
@@ -120,7 +131,7 @@ If the text is not a reminder or makes no sense, return an empty array: []
             logger.error(f"Gemini returned non-list: {result_text}")
             return []
         
-        # Convert to tuples with datetime objects
+        # Convert to list of dicts with datetime objects
         parsed_reminders = []
         for reminder in reminders:
             if not isinstance(reminder, dict) or 'task' not in reminder or 'time_utc' not in reminder:
@@ -128,6 +139,8 @@ If the text is not a reminder or makes no sense, return an empty array: []
             
             task = reminder['task']
             time_str = reminder['time_utc']
+            notes = reminder.get('notes')
+            location = reminder.get('location')
             
             try:
                 # Parse the UTC time string
@@ -135,8 +148,13 @@ If the text is not a reminder or makes no sense, return an empty array: []
                 
                 # Only add if time is in the future
                 if scheduled_time > now_utc:
-                    parsed_reminders.append((task, scheduled_time))
-                    logger.info(f"Gemini parsed: task='{task}', time={scheduled_time}")
+                    parsed_reminders.append({
+                        "task": task,
+                        "time": scheduled_time,
+                        "notes": notes,
+                        "location": location
+                    })
+                    logger.info(f"Gemini parsed: task='{task}', time={scheduled_time}, notes='{notes}', location='{location}'")
                 else:
                     logger.warning(f"Gemini returned past time: {time_str}")
             except ValueError as e:

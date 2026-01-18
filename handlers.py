@@ -196,6 +196,15 @@ async def list_reminders_command(update: Update, context: ContextTypes.DEFAULT_T
         formatted_time = format_datetime(scheduled, user_tz)
         
         message += f"**#{reminder['id']}** - {reminder['task_text']}\n"
+        
+        # Show location if available
+        if reminder.get('location'):
+            message += f"   📍 {reminder['location']}\n"
+        
+        # Show notes if available
+        if reminder.get('notes'):
+            message += f"   📋 {reminder['notes']}\n"
+        
         message += f"   ⏰ {formatted_time}\n\n"
     
     message += "_/done [id] - bajarildi | /delete [id] - o'chirish_"
@@ -445,6 +454,10 @@ async def voice_message_handler(update: Update, context: ContextTypes.DEFAULT_TY
             return await handle_multiple_tasks(update, context, tasks, user_tz, detected_lang)
         
         # Step 3: Parse the reminder text and time
+        # Initialize notes and location
+        notes = None
+        location = None
+        
         # Choose parsing strategy based on configuration
         if ALWAYS_USE_GEMINI:
             # Always use Gemini AI for better understanding
@@ -461,8 +474,12 @@ async def voice_message_handler(update: Update, context: ContextTypes.DEFAULT_TY
             )
             
             if gemini_results:
-                task_text, scheduled_time = gemini_results[0]
-                logger.info(f"Gemini parsed: {task_text} at {scheduled_time}")
+                result = gemini_results[0]
+                task_text = result["task"]
+                scheduled_time = result["time"]
+                notes = result.get("notes")
+                location = result.get("location")
+                logger.info(f"Gemini parsed: {task_text} at {scheduled_time}, notes={notes}, location={location}")
             else:
                 # Fallback to regex if Gemini fails
                 task_text, scheduled_time = parse_reminder_text(
@@ -494,12 +511,18 @@ async def voice_message_handler(update: Update, context: ContextTypes.DEFAULT_TY
                 
                 if gemini_results:
                     # Use the first result from Gemini
-                    task_text, scheduled_time = gemini_results[0]
-                    logger.info(f"Gemini successfully parsed: {task_text} at {scheduled_time}")
+                    result = gemini_results[0]
+                    task_text = result["task"]
+                    scheduled_time = result["time"]
+                    notes = result.get("notes")
+                    location = result.get("location")
+                    logger.info(f"Gemini successfully parsed: {task_text} at {scheduled_time}, notes={notes}, location={location}")
         
         # Store transcription in context for potential re-use
         context.user_data['last_transcription'] = transcription
         context.user_data['task_text'] = task_text
+        context.user_data['notes'] = notes
+        context.user_data['location'] = location
         context.user_data['user_timezone'] = user_tz
         context.user_data['detected_language'] = detected_lang
         
@@ -522,22 +545,35 @@ async def voice_message_handler(update: Update, context: ContextTypes.DEFAULT_TY
             chat_id=chat_id,
             task_text=task_text,
             scheduled_time=scheduled_time,
-            user_timezone=user_tz
+            user_timezone=user_tz,
+            notes=notes,
+            location=location
         )
         
         formatted_time = format_datetime(scheduled_time, user_tz)
         
-        await update.message.reply_text(
+        # Build confirmation message with notes and location
+        confirmation_msg = (
             f"✅ **Eslatma yaratildi!**\n"
             f"**Напоминание создано!**\n\n"
             f"📝 {task_text}\n"
-            f"⏰ {formatted_time}\n\n"
-            f"_Belgilangan vaqtda eslataman._\n"
-            f"_Напомню в указанное время._",
-            parse_mode='Markdown'
         )
         
-        logger.info(f"Created reminder {reminder_id} for user {user_id}: {task_text}")
+        if location:
+            confirmation_msg += f"📍 {location}\n"
+        
+        if notes:
+            confirmation_msg += f"📋 {notes}\n"
+        
+        confirmation_msg += (
+            f"\n⏰ {formatted_time}\n\n"
+            f"_Belgilangan vaqtda eslataman._\n"
+            f"_Напомню в указанное время._"
+        )
+        
+        await update.message.reply_text(confirmation_msg, parse_mode='Markdown')
+        
+        logger.info(f"Created reminder {reminder_id} for user {user_id}: {task_text}, notes={notes}, location={location}")
         return ConversationHandler.END
     
     except AudioTooShortError as e:
