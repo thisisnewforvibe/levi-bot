@@ -591,3 +591,121 @@ async def schedule_next_recurrence(reminder: dict) -> Optional[int]:
     )
     
     return new_id
+
+
+# ============ Admin Functions ============
+
+async def get_all_reminders_admin(limit: int = 100) -> List[dict]:
+    """
+    Get all reminders for admin panel.
+    
+    Returns:
+        List of all reminder dictionaries with user info.
+    """
+    async with aiosqlite.connect(DATABASE_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            """
+            SELECT id, user_id, chat_id, task_text, notes, location, 
+                   scheduled_time_utc, user_timezone, status, 
+                   recurrence_type, created_at
+            FROM reminders
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (limit,)
+        )
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+
+
+async def get_all_users_admin() -> List[dict]:
+    """
+    Get all users with their reminder counts.
+    
+    Returns:
+        List of user dictionaries with stats.
+    """
+    async with aiosqlite.connect(DATABASE_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            """
+            SELECT 
+                r.user_id,
+                COUNT(*) as total_reminders,
+                SUM(CASE WHEN r.status = 'pending' THEN 1 ELSE 0 END) as pending_reminders,
+                SUM(CASE WHEN r.status = 'completed' THEN 1 ELSE 0 END) as completed_reminders,
+                MIN(r.created_at) as first_reminder,
+                MAX(r.created_at) as last_reminder
+            FROM reminders r
+            GROUP BY r.user_id
+            ORDER BY last_reminder DESC
+            """
+        )
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+
+
+async def get_user_reminders_admin(user_id: int) -> List[dict]:
+    """
+    Get all reminders for a specific user (admin view).
+    
+    Returns:
+        List of reminder dictionaries.
+    """
+    async with aiosqlite.connect(DATABASE_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            """
+            SELECT id, task_text, notes, location, scheduled_time_utc, 
+                   user_timezone, status, recurrence_type, created_at
+            FROM reminders
+            WHERE user_id = ?
+            ORDER BY created_at DESC
+            LIMIT 50
+            """,
+            (user_id,)
+        )
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+
+
+async def get_stats_admin() -> dict:
+    """
+    Get overall bot statistics.
+    
+    Returns:
+        Dictionary with stats.
+    """
+    async with aiosqlite.connect(DATABASE_PATH) as db:
+        # Total reminders
+        cursor = await db.execute("SELECT COUNT(*) FROM reminders")
+        total_reminders = (await cursor.fetchone())[0]
+        
+        # Pending reminders
+        cursor = await db.execute("SELECT COUNT(*) FROM reminders WHERE status = 'pending'")
+        pending_reminders = (await cursor.fetchone())[0]
+        
+        # Unique users
+        cursor = await db.execute("SELECT COUNT(DISTINCT user_id) FROM reminders")
+        total_users = (await cursor.fetchone())[0]
+        
+        # Today's reminders
+        cursor = await db.execute(
+            "SELECT COUNT(*) FROM reminders WHERE DATE(created_at) = DATE('now')"
+        )
+        today_reminders = (await cursor.fetchone())[0]
+        
+        # Recurring reminders
+        cursor = await db.execute(
+            "SELECT COUNT(*) FROM reminders WHERE recurrence_type IS NOT NULL AND status = 'pending'"
+        )
+        recurring_reminders = (await cursor.fetchone())[0]
+        
+        return {
+            'total_reminders': total_reminders,
+            'pending_reminders': pending_reminders,
+            'total_users': total_users,
+            'today_reminders': today_reminders,
+            'recurring_reminders': recurring_reminders
+        }

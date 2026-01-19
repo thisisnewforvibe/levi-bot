@@ -57,6 +57,9 @@ ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 AISHA_API_KEY = os.getenv("AISHA_API_KEY")
 USE_AISHA = TRANSCRIPTION_SERVICE == "aisha"
 
+# Admin configuration
+ADMIN_USER_IDS = [int(id.strip()) for id in os.getenv("ADMIN_USER_IDS", "").split(",") if id.strip()]
+
 # Retry settings
 MAX_RETRIES = 3
 RETRY_DELAY_SECONDS = 1

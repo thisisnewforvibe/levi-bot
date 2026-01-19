@@ -34,6 +34,10 @@ from handlers import (
     cancel_command,
     unknown_message_handler,
     error_handler,
+    admin_command,
+    admin_users_command,
+    admin_reminders_command,
+    admin_user_command,
     WAITING_FOR_TIME,
     WAITING_FOR_CONFIRMATION,
     WAITING_FOR_SNOOZE,
@@ -137,6 +141,12 @@ def main() -> None:
     application.add_handler(CommandHandler("done", done_command))
     application.add_handler(CommandHandler("delete", delete_command))
     application.add_handler(CommandHandler("cancel", cancel_command))
+    
+    # Admin commands
+    application.add_handler(CommandHandler("admin", admin_command))
+    application.add_handler(CommandHandler("users", admin_users_command))
+    application.add_handler(CommandHandler("reminders", admin_reminders_command))
+    application.add_handler(CommandHandler("user", admin_user_command))
     
     # Add conversation handlers
     application.add_handler(voice_conv_handler)

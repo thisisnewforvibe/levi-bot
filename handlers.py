@@ -23,8 +23,12 @@ from database import (
     get_user_preferences,
     set_user_preferences,
     check_rate_limit,
+    get_all_reminders_admin,
+    get_all_users_admin,
+    get_user_reminders_admin,
+    get_stats_admin,
 )
-from config import TRANSCRIPTION_SERVICE, WHISPER_MODEL_SIZE, ELEVENLABS_API_KEY
+from config import TRANSCRIPTION_SERVICE, WHISPER_MODEL_SIZE, ELEVENLABS_API_KEY, ADMIN_USER_IDS
 
 # Try to import Aisha API key
 try:
@@ -1021,3 +1025,151 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             )
         except Exception:
             pass  # Can't send message, ignore
+
+
+# ============ Admin Commands ============
+
+def is_admin(user_id: int) -> bool:
+    """Check if user is an admin."""
+    return user_id in ADMIN_USER_IDS
+
+
+async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /admin command - show admin panel."""
+    user_id = update.effective_user.id
+    
+    if not is_admin(user_id):
+        await update.message.reply_text("⛔ Admin access required.")
+        return
+    
+    # Get stats
+    stats = await get_stats_admin()
+    
+    message = (
+        "📊 **Admin Panel**\n\n"
+        f"👥 Total Users: {stats['total_users']}\n"
+        f"📝 Total Reminders: {stats['total_reminders']}\n"
+        f"⏳ Pending: {stats['pending_reminders']}\n"
+        f"🔄 Recurring: {stats['recurring_reminders']}\n"
+        f"📅 Today: {stats['today_reminders']}\n\n"
+        "**Commands:**\n"
+        "/admin - This panel\n"
+        "/users - List all users\n"
+        "/reminders - Recent reminders\n"
+        "/user [id] - User's reminders"
+    )
+    
+    await update.message.reply_text(message, parse_mode='Markdown')
+
+
+async def admin_users_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /users command - list all users."""
+    user_id = update.effective_user.id
+    
+    if not is_admin(user_id):
+        await update.message.reply_text("⛔ Admin access required.")
+        return
+    
+    users = await get_all_users_admin()
+    
+    if not users:
+        await update.message.reply_text("No users found.")
+        return
+    
+    message = "👥 **All Users:**\n\n"
+    
+    for user in users[:20]:  # Limit to 20 users
+        message += (
+            f"**ID: {user['user_id']}**\n"
+            f"   📝 Total: {user['total_reminders']} | "
+            f"⏳ Pending: {user['pending_reminders']} | "
+            f"✅ Done: {user['completed_reminders']}\n"
+            f"   📅 Last: {user['last_reminder'][:10] if user['last_reminder'] else 'N/A'}\n\n"
+        )
+    
+    message += "_Use /user [id] to see user's reminders_"
+    
+    await update.message.reply_text(message, parse_mode='Markdown')
+
+
+async def admin_reminders_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /reminders command - show recent reminders."""
+    user_id = update.effective_user.id
+    
+    if not is_admin(user_id):
+        await update.message.reply_text("⛔ Admin access required.")
+        return
+    
+    reminders = await get_all_reminders_admin(limit=20)
+    
+    if not reminders:
+        await update.message.reply_text("No reminders found.")
+        return
+    
+    message = "📝 **Recent Reminders:**\n\n"
+    
+    for r in reminders:
+        status_icon = "⏳" if r['status'] == 'pending' else "✅"
+        recur_icon = "🔄" if r.get('recurrence_type') else ""
+        
+        message += (
+            f"{status_icon}{recur_icon} **#{r['id']}** (User: {r['user_id']})\n"
+            f"   📝 {r['task_text'][:50]}{'...' if len(r['task_text']) > 50 else ''}\n"
+        )
+        
+        if r.get('notes'):
+            message += f"   📋 {r['notes'][:30]}{'...' if len(r['notes']) > 30 else ''}\n"
+        
+        if r.get('location'):
+            message += f"   📍 {r['location']}\n"
+        
+        message += f"   ⏰ {r['scheduled_time_utc'][:16]}\n\n"
+    
+    await update.message.reply_text(message, parse_mode='Markdown')
+
+
+async def admin_user_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /user [id] command - show specific user's reminders."""
+    user_id = update.effective_user.id
+    
+    if not is_admin(user_id):
+        await update.message.reply_text("⛔ Admin access required.")
+        return
+    
+    if not context.args:
+        await update.message.reply_text("Usage: /user [user_id]")
+        return
+    
+    try:
+        target_user_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("Invalid user ID.")
+        return
+    
+    reminders = await get_user_reminders_admin(target_user_id)
+    
+    if not reminders:
+        await update.message.reply_text(f"No reminders found for user {target_user_id}.")
+        return
+    
+    message = f"📝 **User {target_user_id}'s Reminders:**\n\n"
+    
+    for r in reminders:
+        status_icon = "⏳" if r['status'] == 'pending' else "✅"
+        recur_icon = "🔄" if r.get('recurrence_type') else ""
+        
+        message += (
+            f"{status_icon}{recur_icon} **#{r['id']}**\n"
+            f"   📝 {r['task_text']}\n"
+        )
+        
+        if r.get('notes'):
+            message += f"   📋 {r['notes']}\n"
+        
+        if r.get('location'):
+            message += f"   📍 {r['location']}\n"
+        
+        message += f"   ⏰ {r['scheduled_time_utc'][:16]}\n"
+        message += f"   📅 Created: {r['created_at'][:10]}\n\n"
+    
+    await update.message.reply_text(message, parse_mode='Markdown')
