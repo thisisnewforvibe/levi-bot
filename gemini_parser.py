@@ -77,6 +77,20 @@ IMPORTANT EXTRACTION RULES:
 - Keep task short and action-oriented
 - Notes should contain details, items, or specifications
 
+CRITICAL TIME PARSING RULES:
+- ALWAYS prioritize EXPLICIT time over general time words!
+- "soat o'n da" / "soat 10 da" = 10:00 (NOT 9:00!)
+- "ertalab soat o'n da" = 10:00 AM (the explicit "o'n/10" overrides "ertalab")
+- "ertalab soat 8 da" = 08:00 AM
+- "kechqurun soat 7 da" = 19:00 (7 PM)
+- If BOTH "ertalab/kechqurun" AND specific hour mentioned, USE THE SPECIFIC HOUR
+- "o'n" / "ун" = 10, "to'qqiz" = 9, "sakkiz" = 8, "yetti" = 7
+
+Uzbek number words:
+- "bir" = 1, "ikki" = 2, "uch" = 3, "to'rt" = 4, "besh" = 5
+- "olti" = 6, "yetti" = 7, "sakkiz" = 8, "to'qqiz" = 9, "o'n" = 10
+- "o'n bir" = 11, "o'n ikki" = 12
+
 Time parsing rules (including slang & colloquialisms):
 CRITICAL: If text contains "X minut" or "X daqiqa" patterns, ALWAYS interpret as "in X minutes from now":
 - "5 minut" / "5 minutdan" / "5 minut anca" / "5 minutda" = 5 minutes from now
@@ -85,13 +99,13 @@ CRITICAL: If text contains "X minut" or "X daqiqa" patterns, ALWAYS interpret as
 - "30 minut" / "yarim soat" = 30 minutes from now
 - "bir soatdan keyin" / "bir soatdan so'ng" = 1 hour from now
 - "ikki soatdan keyin" = 2 hours from now
-- "ertaga" / "ertangi kun" = tomorrow at 9:00 AM
+- "ertaga" / "ertangi kun" = tomorrow at 9:00 AM (only if no specific time given)
 - "bugun" / "shu kun" = today
-- "kechqurun" / "oqshom" = today at 6:00 PM
-- "ertalab" / "tongda" = 8:00 AM (or 9:00 if "ertalab 9 da")
+- "kechqurun" / "oqshom" = 6:00 PM (only if no specific time given)
+- "ertalab" / "tongda" = 8:00 AM (only if no specific time given)
 - "tushlikda" / "peshindan keyin" = today at 1:00 PM
-- "завтра" / "завтра утром" = tomorrow morning (9 AM)
-- "сегодня вечером" / "вечером" = today evening (6 PM)
+- "завтра" / "завтра утром" = tomorrow morning (9 AM, only if no specific time)
+- "сегодня вечером" / "вечером" = today evening (6 PM, only if no specific time)
 - "через час" / "через часик" = 1 hour from now
 - "попозже" / "позже" = 2 hours from now
 - "через полчаса" / "через полчасика" = 30 minutes from now
