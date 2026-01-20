@@ -22,23 +22,52 @@ except ImportError:
 from config import DATABASE_PATH
 
 # Try to import libsql for Turso
+LIBSQL_AVAILABLE = False
+libsql = None
 try:
     import libsql_experimental as libsql
     LIBSQL_AVAILABLE = True
+    logger.info("libsql_experimental available")
 except ImportError:
-    LIBSQL_AVAILABLE = False
-    logger.warning("libsql_experimental not available, using local SQLite")
+    try:
+        import libsql_client as libsql
+        LIBSQL_AVAILABLE = True
+        logger.info("libsql_client available")
+    except ImportError:
+        logger.warning("No libsql library available, using local SQLite")
 
 
 def get_connection():
     """Get database connection (Turso or local SQLite)."""
-    if USE_TURSO and LIBSQL_AVAILABLE and TURSO_DATABASE_URL and TURSO_AUTH_TOKEN:
-        return libsql.connect(
-            TURSO_DATABASE_URL,
-            auth_token=TURSO_AUTH_TOKEN
-        )
+    if USE_TURSO and LIBSQL_AVAILABLE and TURSO_DATABASE_URL and TURSO_AUTH_TOKEN and libsql:
+        try:
+            conn = libsql.connect(
+                TURSO_DATABASE_URL,
+                auth_token=TURSO_AUTH_TOKEN
+            )
+            logger.info("Connected to Turso")
+            return conn
+        except Exception as e:
+            logger.error(f"Failed to connect to Turso: {e}, falling back to local SQLite")
+            return sqlite3.connect(DATABASE_PATH)
     else:
         return sqlite3.connect(DATABASE_PATH)
+
+
+def rows_to_dicts(cursor, rows) -> List[dict]:
+    """Convert rows to list of dictionaries."""
+    if not rows:
+        return []
+    columns = [description[0] for description in cursor.description]
+    return [dict(zip(columns, row)) for row in rows]
+
+
+def row_to_dict(cursor, row) -> Optional[dict]:
+    """Convert single row to dictionary."""
+    if not row:
+        return None
+    columns = [description[0] for description in cursor.description]
+    return dict(zip(columns, row))
 
 
 def init_database() -> None:
@@ -140,7 +169,6 @@ async def add_reminder(
 async def get_pending_reminders(before_time: datetime) -> List[dict]:
     """Get all pending reminders scheduled before the given time (UTC)."""
     conn = get_connection()
-    conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute(
         """
@@ -154,23 +182,20 @@ async def get_pending_reminders(before_time: datetime) -> List[dict]:
         (before_time.isoformat(),)
     )
     rows = cursor.fetchall()
+    result = rows_to_dicts(cursor, rows)
     conn.close()
     
-    result = []
-    for row in rows:
-        d = dict(row)
+    for d in result:
         d.setdefault('recurrence_type', None)
         d.setdefault('recurrence_time', None)
         d.setdefault('notes', None)
         d.setdefault('location', None)
-        result.append(d)
     return result
 
 
 async def get_follow_up_reminders(follow_up_after: datetime) -> List[dict]:
     """Get reminders that need a follow-up (30 minutes after initial reminder)."""
     conn = get_connection()
-    conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute(
         """
@@ -185,8 +210,9 @@ async def get_follow_up_reminders(follow_up_after: datetime) -> List[dict]:
         (follow_up_after.isoformat(),)
     )
     rows = cursor.fetchall()
+    result = rows_to_dicts(cursor, rows)
     conn.close()
-    return [dict(row) for row in rows]
+    return result
 
 
 async def mark_initial_reminder_sent(reminder_id: int) -> None:
@@ -278,7 +304,6 @@ async def reschedule_reminder(reminder_id: int, new_time: datetime) -> None:
 async def get_user_reminders(user_id: int, status: Optional[str] = None) -> List[dict]:
     """Get all reminders for a specific user."""
     conn = get_connection()
-    conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     
     if status:
@@ -303,14 +328,14 @@ async def get_user_reminders(user_id: int, status: Optional[str] = None) -> List
         )
     
     rows = cursor.fetchall()
+    result = rows_to_dicts(cursor, rows)
     conn.close()
-    return [dict(row) for row in rows]
+    return result
 
 
 async def get_reminder_by_id(reminder_id: int) -> Optional[dict]:
     """Get a specific reminder by ID."""
     conn = get_connection()
-    conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute(
         """
@@ -322,8 +347,9 @@ async def get_reminder_by_id(reminder_id: int) -> Optional[dict]:
         (reminder_id,)
     )
     row = cursor.fetchone()
+    result = row_to_dict(cursor, row)
     conn.close()
-    return dict(row) if row else None
+    return result
 
 
 async def delete_reminder(reminder_id: int) -> bool:
@@ -343,7 +369,6 @@ async def delete_reminder(reminder_id: int) -> bool:
 async def get_latest_pending_reminder(user_id: int) -> Optional[dict]:
     """Get the most recently created pending reminder for a user."""
     conn = get_connection()
-    conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute(
         """
@@ -358,8 +383,9 @@ async def get_latest_pending_reminder(user_id: int) -> Optional[dict]:
         (user_id,)
     )
     row = cursor.fetchone()
+    result = row_to_dict(cursor, row)
     conn.close()
-    return dict(row) if row else None
+    return result
 
 
 # ============ User Preferences Functions ============
@@ -367,15 +393,15 @@ async def get_latest_pending_reminder(user_id: int) -> Optional[dict]:
 async def get_user_preferences(user_id: int) -> Optional[dict]:
     """Get user preferences (timezone, language)."""
     conn = get_connection()
-    conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute(
         "SELECT * FROM user_preferences WHERE user_id = ?",
         (user_id,)
     )
     row = cursor.fetchone()
+    result = row_to_dict(cursor, row)
     conn.close()
-    return dict(row) if row else None
+    return result
 
 
 async def set_user_preferences(
@@ -459,7 +485,6 @@ async def check_rate_limit(user_id: int, limit: int, window_seconds: int) -> boo
 async def get_all_pending_reminders() -> List[dict]:
     """Get ALL pending reminders for restart recovery."""
     conn = get_connection()
-    conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute(
         """
@@ -471,8 +496,9 @@ async def get_all_pending_reminders() -> List[dict]:
         """
     )
     rows = cursor.fetchall()
+    result = rows_to_dicts(cursor, rows)
     conn.close()
-    return [dict(row) for row in rows]
+    return result
 
 
 async def schedule_next_recurrence(reminder: dict) -> Optional[int]:
@@ -545,7 +571,6 @@ async def schedule_next_recurrence(reminder: dict) -> Optional[int]:
 async def get_all_reminders_admin(limit: int = 100) -> List[dict]:
     """Get all reminders for admin panel."""
     conn = get_connection()
-    conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute(
         """
@@ -559,14 +584,14 @@ async def get_all_reminders_admin(limit: int = 100) -> List[dict]:
         (limit,)
     )
     rows = cursor.fetchall()
+    result = rows_to_dicts(cursor, rows)
     conn.close()
-    return [dict(row) for row in rows]
+    return result
 
 
 async def get_all_users_admin() -> List[dict]:
     """Get all users with their reminder counts."""
     conn = get_connection()
-    conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute(
         """
@@ -583,14 +608,14 @@ async def get_all_users_admin() -> List[dict]:
         """
     )
     rows = cursor.fetchall()
+    result = rows_to_dicts(cursor, rows)
     conn.close()
-    return [dict(row) for row in rows]
+    return result
 
 
 async def get_user_reminders_admin(user_id: int) -> List[dict]:
     """Get all reminders for a specific user (admin view)."""
     conn = get_connection()
-    conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
     cursor.execute(
         """
@@ -604,8 +629,9 @@ async def get_user_reminders_admin(user_id: int) -> List[dict]:
         (user_id,)
     )
     rows = cursor.fetchall()
+    result = rows_to_dicts(cursor, rows)
     conn.close()
-    return [dict(row) for row in rows]
+    return result
 
 
 async def get_stats_admin() -> dict:
