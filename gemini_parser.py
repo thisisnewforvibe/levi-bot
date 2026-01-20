@@ -198,8 +198,6 @@ If the text is not a reminder or makes no sense, return an empty array: []
                     "recurrence_time": recurrence_time
                 })
                 logger.info(f"Gemini parsed: task='{task}', time={scheduled_time}, notes='{notes}', location='{location}', recurrence='{recurrence_type}' at '{recurrence_time}'")
-                else:
-                    logger.warning(f"Gemini returned past time: {time_str}")
             except ValueError as e:
                 logger.error(f"Failed to parse Gemini time '{time_str}': {e}")
                 continue
