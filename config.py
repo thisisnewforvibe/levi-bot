@@ -21,7 +21,7 @@ GOOGLE_CLOUD_PROJECT = os.getenv("GOOGLE_CLOUD_PROJECT", None)
 # Gemini AI API Key (for intelligent parsing)
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 USE_GEMINI_FALLBACK = bool(GEMINI_API_KEY)  # Enable Gemini if API key is present
-ALWAYS_USE_GEMINI = os.getenv("ALWAYS_USE_GEMINI", "false").lower() == "true"  # Use Gemini for ALL requests
+ALWAYS_USE_GEMINI = os.getenv("ALWAYS_USE_GEMINI", "true").lower() == "true"  # Use Gemini for ALL requests (default: true)
 
 # Database configuration
 DATABASE_PATH = os.getenv("DATABASE_PATH", "reminders.db")

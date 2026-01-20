@@ -127,11 +127,15 @@ If the text is not a reminder or makes no sense, return an empty array: []
         response = model.generate_content(prompt)
         result_text = response.text.strip()
         
+        logger.info(f"Gemini raw response: {result_text[:500]}")
+        
         # Extract JSON from response (remove markdown code blocks if present)
         if "```json" in result_text:
             result_text = result_text.split("```json")[1].split("```")[0].strip()
         elif "```" in result_text:
             result_text = result_text.split("```")[1].split("```")[0].strip()
+        
+        logger.info(f"Gemini cleaned JSON: {result_text}")
         
         # Parse JSON response
         reminders = json.loads(result_text)
@@ -157,17 +161,43 @@ If the text is not a reminder or makes no sense, return an empty array: []
                 # Parse the UTC time string
                 scheduled_time = datetime.strptime(time_str, '%Y-%m-%d %H:%M')
                 
-                # Only add if time is in the future
-                if scheduled_time > now_utc:
-                    parsed_reminders.append({
-                        "task": task,
-                        "time": scheduled_time,
-                        "notes": notes,
-                        "location": location,
-                        "recurrence_type": recurrence_type,
-                        "recurrence_time": recurrence_time
-                    })
-                    logger.info(f"Gemini parsed: task='{task}', time={scheduled_time}, notes='{notes}', location='{location}', recurrence='{recurrence_type}' at '{recurrence_time}'")
+                # Check if time is in the past
+                if scheduled_time <= now_utc:
+                    # For RECURRING reminders, schedule for next valid occurrence
+                    if recurrence_type:
+                        logger.info(f"Recurring reminder with past time {time_str}, scheduling for next occurrence")
+                        if recurrence_type == 'daily':
+                            # Schedule for tomorrow at the same time
+                            scheduled_time = scheduled_time + timedelta(days=1)
+                        elif recurrence_type == 'weekdays':
+                            # Schedule for next weekday
+                            scheduled_time = scheduled_time + timedelta(days=1)
+                            while scheduled_time.weekday() >= 5:  # Skip weekends
+                                scheduled_time = scheduled_time + timedelta(days=1)
+                        elif recurrence_type == 'weekly':
+                            # Schedule for next week
+                            scheduled_time = scheduled_time + timedelta(weeks=1)
+                        elif recurrence_type == 'monthly':
+                            # Schedule for next month
+                            if scheduled_time.month == 12:
+                                scheduled_time = scheduled_time.replace(year=scheduled_time.year + 1, month=1)
+                            else:
+                                scheduled_time = scheduled_time.replace(month=scheduled_time.month + 1)
+                        logger.info(f"Rescheduled recurring reminder to: {scheduled_time}")
+                    else:
+                        # Non-recurring reminder in past - skip it
+                        logger.warning(f"Gemini returned past time for non-recurring: {time_str}")
+                        continue
+                
+                parsed_reminders.append({
+                    "task": task,
+                    "time": scheduled_time,
+                    "notes": notes,
+                    "location": location,
+                    "recurrence_type": recurrence_type,
+                    "recurrence_time": recurrence_time
+                })
+                logger.info(f"Gemini parsed: task='{task}', time={scheduled_time}, notes='{notes}', location='{location}', recurrence='{recurrence_type}' at '{recurrence_time}'")
                 else:
                     logger.warning(f"Gemini returned past time: {time_str}")
             except ValueError as e:
