@@ -28,6 +28,7 @@ from database import (
     get_user_reminders_admin,
     get_stats_admin,
 )
+from scheduler import schedule_next_recurrence
 from config import TRANSCRIPTION_SERVICE, WHISPER_MODEL_SIZE, ELEVENLABS_API_KEY, ADMIN_USER_IDS
 
 # Try to import Aisha API key
@@ -842,15 +843,39 @@ async def yes_no_callback_handler(update: Update, context: ContextTypes.DEFAULT_
         )
         return
     
+    # Check if this is a recurring reminder
+    is_recurring = reminder.get('recurrence_type') is not None
+    
     if action == "reminder_yes":
         # Mark as done
         await update_reminder_status(reminder['id'], 'done')
-        await query.edit_message_text(
-            f"✅ **Ajoyib!** Vazifa bajarildi!\n"
-            f"**Отлично!** Задача выполнена!\n\n"
-            f"📝 _{reminder['task_text']}_",
-            parse_mode='Markdown'
-        )
+        
+        # For recurring reminders, schedule the next occurrence
+        if is_recurring:
+            new_id = await schedule_next_recurrence(reminder)
+            recurrence_labels = {
+                'daily': 'ertaga / завтра',
+                'weekly': 'kelasi hafta / на следующей неделе',
+                'weekdays': 'keyingi ish kuni / в следующий рабочий день',
+                'monthly': 'kelasi oy / в следующем месяце'
+            }
+            next_label = recurrence_labels.get(reminder.get('recurrence_type'), 'keyingi safar / в следующий раз')
+            
+            await query.edit_message_text(
+                f"✅ **Ajoyib!** Vazifa bajarildi!\n"
+                f"**Отлично!** Задача выполнена!\n\n"
+                f"📝 _{reminder['task_text']}_\n\n"
+                f"🔁 Keyingi eslatma: {next_label}\n"
+                f"Следующее напоминание: {next_label}",
+                parse_mode='Markdown'
+            )
+        else:
+            await query.edit_message_text(
+                f"✅ **Ajoyib!** Vazifa bajarildi!\n"
+                f"**Отлично!** Задача выполнена!\n\n"
+                f"📝 _{reminder['task_text']}_",
+                parse_mode='Markdown'
+            )
     
     elif action == "reminder_no":
         # Automatically reschedule for 30 minutes later
@@ -877,6 +902,9 @@ async def yes_no_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         # No pending reminder with follow-up - might be out of context
         return ConversationHandler.END
     
+    # Check if this is a recurring reminder
+    is_recurring = reminder.get('recurrence_type') is not None
+    
     # Positive responses (Uzbek and Russian)
     positive = ['HA', 'XA', 'ХА', 'BAJARILDI', 'TAYYOR', 'TUGADI', 'ДА', 'Д', 'ГОТОВО', 'ВЫПОЛНЕНО', '✅']
     # Negative responses (Uzbek and Russian)
@@ -885,12 +913,33 @@ async def yes_no_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     if text in positive:
         # Mark as done
         await update_reminder_status(reminder['id'], 'done')
-        await update.message.reply_text(
-            f"✅ **Ajoyib!** Vazifa bajarildi!\n"
-            f"**Отлично!** Задача выполнена!\n\n"
-            f"📝 _{reminder['task_text']}_",
-            parse_mode='Markdown'
-        )
+        
+        # For recurring reminders, schedule the next occurrence
+        if is_recurring:
+            new_id = await schedule_next_recurrence(reminder)
+            recurrence_labels = {
+                'daily': 'ertaga / завтра',
+                'weekly': 'kelasi hafta / на следующей неделе',
+                'weekdays': 'keyingi ish kuni / в следующий рабочий день',
+                'monthly': 'kelasi oy / в следующем месяце'
+            }
+            next_label = recurrence_labels.get(reminder.get('recurrence_type'), 'keyingi safar / в следующий раз')
+            
+            await update.message.reply_text(
+                f"✅ **Ajoyib!** Vazifa bajarildi!\n"
+                f"**Отлично!** Задача выполнена!\n\n"
+                f"📝 _{reminder['task_text']}_\n\n"
+                f"🔁 Keyingi eslatma: {next_label}\n"
+                f"Следующее напоминание: {next_label}",
+                parse_mode='Markdown'
+            )
+        else:
+            await update.message.reply_text(
+                f"✅ **Ajoyib!** Vazifa bajarildi!\n"
+                f"**Отлично!** Задача выполнена!\n\n"
+                f"📝 _{reminder['task_text']}_",
+                parse_mode='Markdown'
+            )
         return ConversationHandler.END
     
     elif text in negative:

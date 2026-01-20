@@ -187,7 +187,7 @@ async def get_pending_reminders(before_time: datetime) -> List[Tuple]:
 async def get_follow_up_reminders(follow_up_after: datetime) -> List[dict]:
     """
     Get reminders that need a follow-up (30 minutes after initial reminder).
-    Only for non-recurring reminders (recurring ones don't need follow-up).
+    Includes both regular and recurring reminders.
     
     Returns:
         List of reminder dictionaries needing follow-up.
@@ -201,7 +201,6 @@ async def get_follow_up_reminders(follow_up_after: datetime) -> List[dict]:
             WHERE status = 'pending' 
             AND initial_reminder_sent = 1
             AND follow_up_sent = 0
-            AND recurrence_type IS NULL
             AND scheduled_time_utc <= ?
             ORDER BY scheduled_time_utc ASC
             """,
@@ -392,7 +391,8 @@ async def get_latest_pending_reminder(user_id: int) -> Optional[dict]:
         cursor = await db.execute(
             """
             SELECT id, user_id, chat_id, task_text, scheduled_time_utc, 
-                   user_timezone, status, follow_up_sent
+                   user_timezone, status, follow_up_sent, notes, location,
+                   recurrence_type, recurrence_time
             FROM reminders
             WHERE user_id = ? AND status = 'pending' AND follow_up_sent = 1
             ORDER BY scheduled_time_utc DESC

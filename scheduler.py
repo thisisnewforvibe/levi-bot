@@ -99,23 +99,26 @@ async def send_reminder(context: ContextTypes.DEFAULT_TYPE, reminder: dict) -> N
         
         message += f"\n⏰ _{formatted_time}_"
         
+        # Add recurrence info if recurring
+        if is_recurring:
+            recurrence_labels = {
+                'daily': '🔁 Har kuni / Ежедневно',
+                'weekly': '🔁 Har hafta / Еженедельно',
+                'weekdays': '🔁 Ish kunlari / По будням',
+                'monthly': '🔁 Har oy / Ежемесячно'
+            }
+            rec_label = recurrence_labels.get(recurrence_type, '🔁 Takroriy / Повторяющееся')
+            message += f"\n{rec_label}"
+        
         await context.bot.send_message(
             chat_id=reminder['chat_id'],
             text=message,
             parse_mode='Markdown'
         )
         
-        # For recurring reminders, schedule the next occurrence and mark this one as done
-        if is_recurring:
-            new_id = await schedule_next_recurrence(reminder)
-            if new_id:
-                logger.info(f"Scheduled next recurrence {new_id} for recurring reminder {reminder['id']}")
-            # Mark the current reminder as completed
-            await update_reminder_status(reminder['id'], 'completed')
-        else:
-            # Mark that initial reminder has been sent (NOT follow-up)
-            # This allows the follow-up to be sent 30 minutes later
-            await mark_initial_reminder_sent(reminder['id'])
+        # For ALL reminders (including recurring), mark initial_reminder_sent
+        # Follow-up will be sent 30 minutes later
+        await mark_initial_reminder_sent(reminder['id'])
         
         logger.info(f"Sent reminder {reminder['id']} to user {reminder['user_id']}{' (recurring)' if is_recurring else ''}")
         
