@@ -26,6 +26,11 @@ ALWAYS_USE_GEMINI = os.getenv("ALWAYS_USE_GEMINI", "false").lower() == "true"  #
 # Database configuration
 DATABASE_PATH = os.getenv("DATABASE_PATH", "reminders.db")
 
+# Turso (Cloud SQLite) configuration
+TURSO_DATABASE_URL = os.getenv("TURSO_DATABASE_URL")  # e.g., libsql://your-db-name.turso.io
+TURSO_AUTH_TOKEN = os.getenv("TURSO_AUTH_TOKEN")
+USE_TURSO = bool(TURSO_DATABASE_URL and TURSO_AUTH_TOKEN)
+
 # Reminder settings
 FOLLOW_UP_DELAY_SECONDS = 1800  # 30 minutes after reminder
 DEFAULT_SNOOZE_MINUTES = 30
