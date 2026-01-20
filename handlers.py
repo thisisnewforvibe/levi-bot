@@ -88,6 +88,407 @@ WAITING_FOR_TIMEZONE = 4
 WAITING_FOR_TASK_CONFIRMATION = 5
 
 
+async def setup_bot_menu(application) -> None:
+    """Set up the bot menu commands that appear when clicking the menu button."""
+    from telegram import BotCommand, BotCommandScopeAllPrivateChats
+    
+    commands = [
+        BotCommand("reminders", "📋 Eslatmalar / Напоминания"),
+        BotCommand("recurring", "🔁 Takroriy / Повторяющиеся"),
+        BotCommand("settings", "⚙️ Sozlamalar / Настройки"),
+        BotCommand("help", "❓ Yordam / Помощь"),
+        BotCommand("start", "🏠 Boshlash / Начать"),
+    ]
+    
+    await application.bot.set_my_commands(commands, scope=BotCommandScopeAllPrivateChats())
+    logger.info("Bot menu commands set up successfully")
+
+
+async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show the main menu with buttons."""
+    keyboard = [
+        [InlineKeyboardButton("📋 Eslatmalarim / Мои напоминания", callback_data="menu_reminders")],
+        [InlineKeyboardButton("🔁 Takroriy eslatmalar / Повторяющиеся", callback_data="menu_recurring")],
+        [
+            InlineKeyboardButton("⚙️ Sozlamalar", callback_data="menu_settings"),
+            InlineKeyboardButton("❓ Yordam", callback_data="menu_help")
+        ],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await update.message.reply_text(
+        "📱 **Menyu / Меню**\n\n"
+        "Quyidagi tugmalardan birini tanlang:\n"
+        "Выберите один из пунктов ниже:",
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
+    )
+
+
+async def reminders_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show reminders with inline delete buttons."""
+    user_id = update.effective_user.id
+    
+    # Get user timezone
+    prefs = await get_user_preferences(user_id)
+    user_tz = prefs.get('timezone', 'Asia/Tashkent') if prefs else 'Asia/Tashkent'
+    
+    reminders = await get_user_reminders(user_id, status='pending')
+    
+    if not reminders:
+        keyboard = [[InlineKeyboardButton("🎤 Ovozli xabar yuborish", callback_data="menu_voice_tip")]]
+        await update.message.reply_text(
+            "📭 **Sizda eslatmalar yo'q**\n"
+            "**У вас нет напоминаний**\n\n"
+            "Ovozli xabar yuboring eslatma yaratish uchun!\n"
+            "Отправьте голосовое сообщение для создания напоминания!",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+        return
+    
+    message = "📋 **Eslatmalaringiz / Ваши напоминания:**\n\n"
+    keyboard = []
+    
+    for reminder in reminders:
+        scheduled = datetime.fromisoformat(reminder['scheduled_time_utc'])
+        formatted_time = format_datetime(scheduled, user_tz)
+        
+        # Recurrence icon
+        recurrence_icons = {
+            'daily': '🔄',
+            'weekly': '📅',
+            'weekdays': '💼',
+            'monthly': '📆'
+        }
+        rec_icon = recurrence_icons.get(reminder.get('recurrence_type'), '')
+        
+        # Truncate long task text
+        task_text = reminder['task_text']
+        if len(task_text) > 30:
+            task_text = task_text[:27] + "..."
+        
+        message += f"**#{reminder['id']}** {rec_icon} {task_text}\n"
+        message += f"   ⏰ {formatted_time}\n"
+        
+        if reminder.get('location'):
+            message += f"   📍 {reminder['location']}\n"
+        
+        message += "\n"
+        
+        # Add delete button for each reminder
+        keyboard.append([
+            InlineKeyboardButton(
+                f"🗑 #{reminder['id']} - {task_text[:20]}",
+                callback_data=f"del_{reminder['id']}"
+            )
+        ])
+    
+    # Add back button
+    keyboard.append([InlineKeyboardButton("◀️ Orqaga / Назад", callback_data="menu_back")])
+    
+    await update.message.reply_text(
+        message,
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode='Markdown'
+    )
+
+
+async def recurring_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show only recurring reminders with management options."""
+    user_id = update.effective_user.id
+    
+    prefs = await get_user_preferences(user_id)
+    user_tz = prefs.get('timezone', 'Asia/Tashkent') if prefs else 'Asia/Tashkent'
+    
+    reminders = await get_user_reminders(user_id, status='pending')
+    recurring = [r for r in reminders if r.get('recurrence_type')]
+    
+    if not recurring:
+        keyboard = [[InlineKeyboardButton("🎤 Yaratish", callback_data="menu_voice_tip")]]
+        await update.message.reply_text(
+            "📭 **Takroriy eslatmalar yo'q**\n"
+            "**Нет повторяющихся напоминаний**\n\n"
+            "Takroriy eslatma yaratish uchun:\n"
+            "_\"Har kuni soat 9 da gimnastika\"_\n"
+            "_\"Har hafta dushanba kunlari uchrashish\"_\n\n"
+            "Для создания повторяющегося:\n"
+            "_\"Каждый день в 9 утра зарядка\"_\n"
+            "_\"Каждую неделю в понедельник встреча\"_",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+        return
+    
+    message = "🔁 **Takroriy eslatmalar / Повторяющиеся:**\n\n"
+    keyboard = []
+    
+    recurrence_labels = {
+        'daily': 'Har kuni / Ежедневно',
+        'weekly': 'Har hafta / Еженедельно',
+        'weekdays': 'Ish kunlari / По будням',
+        'monthly': 'Har oy / Ежемесячно'
+    }
+    
+    for reminder in recurring:
+        rec_label = recurrence_labels.get(reminder['recurrence_type'], 'Takroriy')
+        rec_time = reminder.get('recurrence_time', '')
+        
+        message += f"**#{reminder['id']}** {reminder['task_text']}\n"
+        message += f"   🔄 {rec_label}"
+        if rec_time:
+            message += f" - {rec_time}"
+        message += "\n\n"
+        
+        # Stop recurring button
+        keyboard.append([
+            InlineKeyboardButton(
+                f"⏹ To'xtatish #{reminder['id']}",
+                callback_data=f"stop_{reminder['id']}"
+            )
+        ])
+    
+    keyboard.append([InlineKeyboardButton("◀️ Orqaga / Назад", callback_data="menu_back")])
+    
+    await update.message.reply_text(
+        message,
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode='Markdown'
+    )
+
+
+async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show settings menu."""
+    user_id = update.effective_user.id
+    prefs = await get_user_preferences(user_id)
+    
+    current_tz = prefs.get('timezone', 'Asia/Tashkent') if prefs else 'Asia/Tashkent'
+    
+    keyboard = [
+        [InlineKeyboardButton("🌍 Vaqt mintaqasini o'zgartirish", callback_data="settings_timezone")],
+        [InlineKeyboardButton("◀️ Orqaga / Назад", callback_data="menu_back")],
+    ]
+    
+    await update.message.reply_text(
+        f"⚙️ **Sozlamalar / Настройки**\n\n"
+        f"🌍 **Vaqt mintaqasi:** `{current_tz}`\n\n"
+        f"Sozlamalarni o'zgartirish uchun tugmalarni bosing.",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode='Markdown'
+    )
+
+
+async def menu_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle menu button callbacks."""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = update.effective_user.id
+    data = query.data
+    
+    # Get user timezone
+    prefs = await get_user_preferences(user_id)
+    user_tz = prefs.get('timezone', 'Asia/Tashkent') if prefs else 'Asia/Tashkent'
+    
+    if data == "menu_reminders":
+        # Show reminders
+        reminders = await get_user_reminders(user_id, status='pending')
+        
+        if not reminders:
+            await query.edit_message_text(
+                "📭 **Sizda eslatmalar yo'q**\n\n"
+                "Ovozli xabar yuboring eslatma yaratish uchun!",
+                parse_mode='Markdown'
+            )
+            return
+        
+        message = "📋 **Eslatmalaringiz:**\n\n"
+        keyboard = []
+        
+        for reminder in reminders:
+            scheduled = datetime.fromisoformat(reminder['scheduled_time_utc'])
+            formatted_time = format_datetime(scheduled, user_tz)
+            
+            rec_icons = {'daily': '🔄', 'weekly': '📅', 'weekdays': '💼', 'monthly': '📆'}
+            rec_icon = rec_icons.get(reminder.get('recurrence_type'), '')
+            
+            task_text = reminder['task_text']
+            short_task = task_text[:25] + "..." if len(task_text) > 25 else task_text
+            
+            message += f"**#{reminder['id']}** {rec_icon} {task_text}\n"
+            message += f"   ⏰ {formatted_time}\n\n"
+            
+            keyboard.append([
+                InlineKeyboardButton(f"🗑 #{reminder['id']} - O'chirish", callback_data=f"del_{reminder['id']}")
+            ])
+        
+        keyboard.append([InlineKeyboardButton("◀️ Orqaga", callback_data="menu_back")])
+        
+        await query.edit_message_text(
+            message,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+    
+    elif data == "menu_recurring":
+        # Show recurring reminders
+        reminders = await get_user_reminders(user_id, status='pending')
+        recurring = [r for r in reminders if r.get('recurrence_type')]
+        
+        if not recurring:
+            keyboard = [[InlineKeyboardButton("◀️ Orqaga", callback_data="menu_back")]]
+            await query.edit_message_text(
+                "📭 **Takroriy eslatmalar yo'q**\n\n"
+                "Yaratish uchun ovozli xabar yuboring:\n"
+                "_\"Har kuni soat 9 da gimnastika\"_",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode='Markdown'
+            )
+            return
+        
+        message = "🔁 **Takroriy eslatmalar:**\n\n"
+        keyboard = []
+        
+        rec_labels = {'daily': 'Har kuni', 'weekly': 'Har hafta', 'weekdays': 'Ish kunlari', 'monthly': 'Har oy'}
+        
+        for r in recurring:
+            message += f"**#{r['id']}** {r['task_text']}\n"
+            message += f"   🔄 {rec_labels.get(r['recurrence_type'], 'Takroriy')}\n\n"
+            keyboard.append([InlineKeyboardButton(f"⏹ To'xtatish #{r['id']}", callback_data=f"stop_{r['id']}")])
+        
+        keyboard.append([InlineKeyboardButton("◀️ Orqaga", callback_data="menu_back")])
+        
+        await query.edit_message_text(
+            message,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+    
+    elif data == "menu_settings":
+        current_tz = prefs.get('timezone', 'Asia/Tashkent') if prefs else 'Asia/Tashkent'
+        keyboard = [
+            [InlineKeyboardButton("🌍 Vaqt mintaqasi", callback_data="settings_timezone")],
+            [InlineKeyboardButton("◀️ Orqaga", callback_data="menu_back")],
+        ]
+        await query.edit_message_text(
+            f"⚙️ **Sozlamalar**\n\n🌍 Vaqt mintaqasi: `{current_tz}`",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+    
+    elif data == "menu_help":
+        keyboard = [[InlineKeyboardButton("◀️ Orqaga", callback_data="menu_back")]]
+        await query.edit_message_text(
+            "❓ **Yordam**\n\n"
+            "🎤 **Eslatma yaratish:**\n"
+            "Ovozli xabar yuboring:\n"
+            "_\"Ertaga soat 3 da uchrashuv\"_\n"
+            "_\"30 minutdan keyin dori ichish\"_\n\n"
+            "🔁 **Takroriy:**\n"
+            "_\"Har kuni soat 9 da gimnastika\"_\n"
+            "_\"Har hafta dushanba kunlari uchrashuv\"_\n\n"
+            "📝 **Xaridlar ro'yxati:**\n"
+            "_\"Do'konga borishda: non, sut, go'sht\"_",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+    
+    elif data == "menu_back":
+        keyboard = [
+            [InlineKeyboardButton("📋 Eslatmalarim", callback_data="menu_reminders")],
+            [InlineKeyboardButton("🔁 Takroriy", callback_data="menu_recurring")],
+            [
+                InlineKeyboardButton("⚙️ Sozlamalar", callback_data="menu_settings"),
+                InlineKeyboardButton("❓ Yordam", callback_data="menu_help")
+            ],
+        ]
+        await query.edit_message_text(
+            "📱 **Menyu**\n\nTanlang:",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+    
+    elif data == "settings_timezone":
+        await query.edit_message_text(
+            "🌍 **Vaqt mintaqasini o'zgartirish**\n\n"
+            "Shahringiz nomini yozing, masalan:\n"
+            "_Toshkent, Moskva, Istanbul, Dubai_\n\n"
+            "Yoki /timezone buyrug'ini ishlating."
+        )
+    
+    elif data == "menu_voice_tip":
+        await query.edit_message_text(
+            "🎤 **Eslatma yaratish**\n\n"
+            "Ovozli xabar yuboring:\n"
+            "• _\"Ertaga soat 3 da onaga qo'ng'iroq\"_\n"
+            "• _\"30 minutdan keyin dori ichish\"_\n"
+            "• _\"Har kuni 9 da gimnastika\"_"
+        )
+
+
+async def delete_callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle delete button callbacks."""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = update.effective_user.id
+    data = query.data
+    
+    if data.startswith("del_"):
+        reminder_id = int(data.split("_")[1])
+        
+        # Verify ownership and delete
+        reminders = await get_user_reminders(user_id, status='pending')
+        reminder = next((r for r in reminders if r['id'] == reminder_id), None)
+        
+        if not reminder:
+            await query.edit_message_text("❌ Eslatma topilmadi yoki allaqachon o'chirilgan.")
+            return
+        
+        await delete_reminder(reminder_id)
+        
+        # Show confirmation and updated list
+        keyboard = [[InlineKeyboardButton("📋 Eslatmalarga qaytish", callback_data="menu_reminders")]]
+        await query.edit_message_text(
+            f"✅ **O'chirildi!**\n\n"
+            f"🗑 _{reminder['task_text']}_",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+    
+    elif data.startswith("stop_"):
+        reminder_id = int(data.split("_")[1])
+        
+        # Verify and delete recurring reminder
+        reminders = await get_user_reminders(user_id, status='pending')
+        reminder = next((r for r in reminders if r['id'] == reminder_id), None)
+        
+        if not reminder:
+            await query.edit_message_text("❌ Eslatma topilmadi.")
+            return
+        
+        await delete_reminder(reminder_id)
+        
+        keyboard = [[InlineKeyboardButton("🔁 Takroriyga qaytish", callback_data="menu_recurring")]]
+        await query.edit_message_text(
+            f"⏹ **Takroriy eslatma to'xtatildi!**\n\n"
+            f"_{reminder['task_text']}_\n\n"
+            f"Endi bu eslatma kelmayin qoladi.",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='Markdown'
+        )
+    
+    elif data.startswith("confirm_del_"):
+        reminder_id = int(data.split("_")[2])
+        await delete_reminder(reminder_id)
+        
+        keyboard = [[InlineKeyboardButton("📋 Eslatmalarga", callback_data="menu_reminders")]]
+        await query.edit_message_text(
+            "✅ Eslatma o'chirildi!",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle the /start command."""
     user_id = update.effective_user.id

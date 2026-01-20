@@ -38,6 +38,14 @@ from handlers import (
     admin_users_command,
     admin_reminders_command,
     admin_user_command,
+    # New menu handlers
+    setup_bot_menu,
+    menu_command,
+    reminders_command,
+    recurring_command,
+    settings_command,
+    menu_callback_handler,
+    delete_callback_handler,
     WAITING_FOR_TIME,
     WAITING_FOR_CONFIRMATION,
     WAITING_FOR_SNOOZE,
@@ -134,6 +142,11 @@ def main() -> None:
     # Add callback query handler for inline buttons (YES/NO)
     application.add_handler(CallbackQueryHandler(yes_no_callback_handler, pattern="^reminder_(yes|no)$"))
     
+    # Add callback handlers for menu
+    application.add_handler(CallbackQueryHandler(menu_callback_handler, pattern="^menu_"))
+    application.add_handler(CallbackQueryHandler(delete_callback_handler, pattern="^(del_|stop_|confirm_del_)"))
+    application.add_handler(CallbackQueryHandler(menu_callback_handler, pattern="^settings_"))
+    
     # Add command handlers
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
@@ -141,6 +154,12 @@ def main() -> None:
     application.add_handler(CommandHandler("done", done_command))
     application.add_handler(CommandHandler("delete", delete_command))
     application.add_handler(CommandHandler("cancel", cancel_command))
+    
+    # New menu commands
+    application.add_handler(CommandHandler("menu", menu_command))
+    application.add_handler(CommandHandler("reminders", reminders_command))
+    application.add_handler(CommandHandler("recurring", recurring_command))
+    application.add_handler(CommandHandler("settings", settings_command))
     
     # Admin commands
     application.add_handler(CommandHandler("admin", admin_command))
@@ -159,8 +178,9 @@ def main() -> None:
     # Add error handler
     application.add_error_handler(error_handler)
     
-    # Run startup recovery for missed reminders
+    # Run startup recovery for missed reminders and set up menu
     async def post_init(app: Application) -> None:
+        await setup_bot_menu(app)
         await recover_pending_reminders(app)
     
     application.post_init = post_init
