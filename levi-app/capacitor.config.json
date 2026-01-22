@@ -1,0 +1,14 @@
+{
+  "appId": "com.levi.app",
+  "appName": "Levi",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https"
+  },
+  "plugins": {
+    "LocalNotifications": {
+      "smallIcon": "ic_stat_icon_config_sample",
+      "iconColor": "#CE0B7C"
+    }
+  }
+}

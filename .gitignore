@@ -27,6 +27,3 @@ Thumbs.db
 
 # Whisper models (will download on server if needed)
 *.pt
-
-# Levi app (separate deployment)
-levi-app/

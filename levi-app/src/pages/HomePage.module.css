@@ -1,0 +1,366 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  min-height: 100dvh;
+  background-color: var(--background);
+  padding-top: env(safe-area-inset-top);
+  animation: fadeIn 0.3s ease-out;
+}
+
+/* Header */
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 20px 20px 8px;
+  animation: fadeInUp 0.4s ease-out;
+}
+
+.title {
+  font-size: 34px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.5px;
+}
+
+.profileSection {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.greetingText {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.greetingLabel {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+  letter-spacing: 0.5px;
+}
+
+.greetingName {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.profileButton {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--search-bg);
+  border: none;
+  border-radius: 50%;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.profileButton:hover {
+  background: #E8E8E8;
+}
+
+/* Search */
+.searchContainer {
+  padding: 16px 20px;
+}
+
+.searchBox {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  background: var(--search-bg);
+  border: none;
+  border-radius: 28px;
+}
+
+.searchIcon {
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
+.searchInput {
+  flex: 1;
+  border: none;
+  outline: none;
+  font-size: 16px;
+  font-family: inherit;
+  color: var(--text-primary);
+  background: transparent;
+}
+
+.searchInput::placeholder {
+  color: var(--text-tertiary);
+}
+
+/* Filters */
+.filters {
+  display: flex;
+  gap: 8px;
+  padding: 0 20px 16px;
+}
+
+.filterButton {
+  padding: 8px 16px;
+  background: var(--search-bg);
+  border: none;
+  border-radius: 20px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.filterButton:hover {
+  background: #E8E8E8;
+}
+
+.filterActive {
+  background: var(--tag-active-bg);
+  color: var(--tag-active-text);
+}
+
+.filterActive:hover {
+  background: var(--tag-active-bg);
+}
+
+/* Reminders List */
+.remindersList {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 20px;
+  padding-bottom: 100px;
+}
+
+.reminderGroup {
+  margin-bottom: 8px;
+  animation: fadeInUp 0.4s ease-out forwards;
+}
+
+.dateHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+}
+
+.dateText {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--text-tertiary);
+}
+
+.timeText {
+  font-size: 13px;
+  color: var(--text-tertiary);
+}
+
+.timeText::before {
+  content: '·';
+  margin-right: 8px;
+}
+
+/* Reminder Card */
+.reminderCard {
+  background: var(--card-bg);
+  padding: 16px;
+  margin-bottom: 1px;
+  border-bottom: 1px solid var(--divider);
+  transition: transform 0.2s ease, opacity 0.2s ease;
+}
+
+.reminderCard:active {
+  transform: scale(0.98);
+  opacity: 0.9;
+}
+
+.reminderCard:first-of-type {
+  border-top: 1px solid var(--divider);
+}
+
+.reminderTitle {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 6px;
+  line-height: 1.3;
+}
+
+.reminderDescription {
+  font-size: 15px;
+  font-weight: 400;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin-bottom: 12px;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.reminderFooter {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.checkButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  background: var(--search-bg);
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.checkButton:hover {
+  background: #E8E8E8;
+}
+
+.checkButtonDone {
+  background: #000000;
+  color: white;
+}
+
+.checkButtonDone:hover {
+  background: #333333;
+}
+
+.reminderDone .reminderTitle,
+.reminderDone .reminderDescription {
+  opacity: 0.5;
+  text-decoration: line-through;
+}
+
+.playButton {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 10px;
+  background: var(--search-bg);
+  border: none;
+  border-radius: 14px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.playButton:hover {
+  background: #E8E8E8;
+}
+
+.playButton svg {
+  color: var(--text-primary);
+}
+
+/* Record Button Container */
+.recordContainer {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+  padding: 16px 20px;
+  padding-bottom: calc(16px + env(safe-area-inset-bottom));
+  background: linear-gradient(to top, var(--background) 80%, transparent);
+}
+
+.recordButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  max-width: 400px;
+  padding: 18px 32px;
+  background: var(--text-primary);
+  border: none;
+  border-radius: 32px;
+  font-size: 17px;
+  font-weight: 600;
+  color: white;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+}
+
+.recordButton:hover {
+  transform: scale(1.02);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.2);
+}
+
+.recordButton:active {
+  transform: scale(0.98);
+}
+
+.recordDot {
+  width: 12px;
+  height: 12px;
+  background: var(--accent-red);
+  border-radius: 50%;
+}
+
+.recording .recordDot {
+  animation: pulse 1s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(1.2);
+  }
+}
+
+.spinner {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.recordButton:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+/* Responsive */
+@media (max-width: 480px) {
+  .title {
+    font-size: 30px;
+  }
+  
+  .recordButton {
+    padding: 16px 28px;
+    font-size: 16px;
+  }
+}
