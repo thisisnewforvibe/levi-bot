@@ -107,7 +107,7 @@ async def send_reminder(context: ContextTypes.DEFAULT_TYPE, reminder: dict) -> N
                 'weekdays': '🔁 Ish kunlari / По будням',
                 'monthly': '🔁 Har oy / Ежемесячно'
             }
-            rec_label = recurrence_labels.get(recurrence_type, '🔁 Takroriy / Повторяющееся')
+            rec_label = recurrence_labels.get(reminder['recurrence_type'], '🔁 Takroriy / Повторяющееся')
             message += f"\n{rec_label}"
         
         await context.bot.send_message(
@@ -121,6 +121,17 @@ async def send_reminder(context: ContextTypes.DEFAULT_TYPE, reminder: dict) -> N
         await mark_initial_reminder_sent(reminder['id'])
         
         logger.info(f"Sent reminder {reminder['id']} to user {reminder['user_id']}{' (recurring)' if is_recurring else ''}")
+        
+        # For recurring reminders, schedule the next occurrence
+        if is_recurring:
+            try:
+                new_id = await schedule_next_recurrence(reminder)
+                if new_id:
+                    logger.info(f"Scheduled next occurrence of recurring reminder, new ID: {new_id}")
+                else:
+                    logger.warning(f"Failed to schedule next occurrence for reminder {reminder['id']}")
+            except Exception as e:
+                logger.error(f"Error scheduling next recurrence: {e}")
         
     except Exception as e:
         logger.error(f"Failed to send reminder {reminder['id']}: {e}")
