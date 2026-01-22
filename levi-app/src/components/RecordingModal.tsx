@@ -5,7 +5,7 @@ import styles from './RecordingModal.module.css'
 interface RecordingModalProps {
   isOpen: boolean
   onClose: () => void
-  onStop: (audioBlob: Blob) => void
+  onStop: (audioBlob: Blob, duration: number) => void
 }
 
 export default function RecordingModal({ isOpen, onClose, onStop }: RecordingModalProps) {
@@ -21,6 +21,7 @@ export default function RecordingModal({ isOpen, onClose, onStop }: RecordingMod
   const streamRef = useRef<MediaStream | null>(null)
   const analyserRef = useRef<AnalyserNode | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
+  const elapsedTimeRef = useRef(0)
 
   const maxDuration = 120 // 2 minutes in seconds
 
@@ -43,11 +44,13 @@ export default function RecordingModal({ isOpen, onClose, onStop }: RecordingMod
       // Start timer
       timerRef.current = setInterval(() => {
         setElapsedTime(prev => {
-          if (prev >= maxDuration) {
+          const newTime = prev + 1
+          elapsedTimeRef.current = newTime
+          if (newTime >= maxDuration) {
             handleStop()
             return prev
           }
-          return prev + 1
+          return newTime
         })
       }, 1000)
 
@@ -126,7 +129,8 @@ export default function RecordingModal({ isOpen, onClose, onStop }: RecordingMod
 
       mediaRecorder.onstop = () => {
         const audioBlob = new Blob(audioChunksRef.current, { type: mimeType })
-        onStop(audioBlob)
+        const finalDuration = elapsedTimeRef.current
+        onStop(audioBlob, finalDuration)
         cleanup()
       }
 

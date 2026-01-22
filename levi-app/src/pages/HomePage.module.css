@@ -353,6 +353,122 @@
   cursor: not-allowed;
 }
 
+/* Transcription Preview Section */
+.transcriptionSection {
+  margin-bottom: 16px;
+}
+
+.transcriptionCard {
+  background: var(--card-bg);
+  padding: 16px;
+  margin-bottom: 1px;
+  border-bottom: 1px solid var(--divider);
+  border-top: 1px solid var(--divider);
+  animation: slideInDown 0.3s ease-out;
+}
+
+@keyframes slideInDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.transcriptionError {
+  background: #FFF5F5;
+}
+
+.transcriptionHeader {
+  margin-bottom: 8px;
+}
+
+.transcriptionDate {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--text-tertiary);
+}
+
+.transcriptionTitle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 6px;
+}
+
+.transcribingBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+}
+
+.transcribingDot {
+  width: 8px;
+  height: 8px;
+  background: #1a1a1a;
+  border-radius: 50%;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+.transcriptionText {
+  font-size: 15px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin-bottom: 12px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.transcriptionFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.transcriptionActions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.actionButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.actionButton:hover {
+  background: var(--search-bg);
+  color: var(--text-primary);
+}
+
 /* Responsive */
 @media (max-width: 480px) {
   .title {

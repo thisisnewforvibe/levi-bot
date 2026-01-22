@@ -1,9 +1,18 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Search, Play, Check, User, Loader2 } from 'lucide-react'
+import { Search, Play, Check, User, Loader2, Send, MoreHorizontal } from 'lucide-react'
 import styles from './HomePage.module.css'
 import RecordingModal from '../components/RecordingModal'
 import { voiceAPI, remindersAPI, Reminder as APIReminder } from '../services/api'
+
+interface TranscriptionPreview {
+  id: string
+  status: 'transcribing' | 'done' | 'error'
+  transcription?: string
+  duration: string
+  timestamp: Date
+  remindersCreated?: number
+}
 
 interface Reminder {
   id: string
@@ -62,6 +71,7 @@ export default function HomePage() {
   const [isRecording, setIsRecording] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
   const [reminders, setReminders] = useState<Reminder[]>(initialReminders)
+  const [transcriptionPreviews, setTranscriptionPreviews] = useState<TranscriptionPreview[]>([])
 
   const filters: { key: FilterType; label: string }[] = [
     { key: 'all', label: 'Hammasi' },
@@ -111,10 +121,23 @@ export default function HomePage() {
     setIsRecording(false)
   }
 
-  const handleRecordingStop = async (audioBlob: Blob) => {
-    console.log('Recording stopped, blob size:', audioBlob.size)
+  const handleRecordingStop = async (audioBlob: Blob, duration: number) => {
+    console.log('Recording stopped, blob size:', audioBlob.size, 'duration:', duration)
     setIsRecording(false)
     setIsProcessing(true)
+
+    // Create a transcription preview card immediately
+    const previewId = Date.now().toString()
+    const durationStr = formatDuration(duration)
+    
+    const newPreview: TranscriptionPreview = {
+      id: previewId,
+      status: 'transcribing',
+      duration: durationStr,
+      timestamp: new Date(),
+    }
+    
+    setTranscriptionPreviews(prev => [newPreview, ...prev])
 
     try {
       // Send audio to voice API
@@ -124,20 +147,50 @@ export default function HomePage() {
         console.log('Transcription:', result.transcription)
         console.log('Created reminders:', result.reminders)
         
+        // Update preview with transcription
+        setTranscriptionPreviews(prev => 
+          prev.map(p => p.id === previewId ? {
+            ...p,
+            status: 'done' as const,
+            transcription: result.transcription,
+            remindersCreated: result.reminders?.length || 0,
+          } : p)
+        )
+        
         // Reload reminders from API
         await loadReminders()
-        
-        // Show success message
-        alert(`✅ ${result.reminders.length} ta eslatma yaratildi!\n\n"${result.transcription}"`)
       } else {
-        alert(`❌ ${result.message || 'Eslatma yaratib bo\'lmadi'}`)
+        // Update preview with error
+        setTranscriptionPreviews(prev => 
+          prev.map(p => p.id === previewId ? {
+            ...p,
+            status: 'error',
+            transcription: result.message || 'Eslatma yaratib bo\'lmadi',
+          } : p)
+        )
       }
     } catch (error) {
       console.error('Voice processing failed:', error)
-      alert('❌ Ovozni qayta ishlashda xatolik yuz berdi')
+      setTranscriptionPreviews(prev => 
+        prev.map(p => p.id === previewId ? {
+          ...p,
+          status: 'error',
+          transcription: 'Ovozni qayta ishlashda xatolik yuz berdi',
+        } : p)
+      )
     } finally {
       setIsProcessing(false)
     }
+  }
+
+  const formatDuration = (seconds: number): string => {
+    const mins = Math.floor(seconds / 60)
+    const secs = Math.floor(seconds % 60)
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
+  }
+
+  const dismissPreview = (id: string) => {
+    setTranscriptionPreviews(prev => prev.filter(p => p.id !== id))
   }
 
   const toggleReminderDone = (id: string) => {
@@ -204,6 +257,58 @@ export default function HomePage() {
 
       {/* Reminders List */}
       <div className={styles.remindersList}>
+        {/* Transcription Previews */}
+        {transcriptionPreviews.length > 0 && (
+          <div className={styles.transcriptionSection}>
+            {transcriptionPreviews.map((preview) => (
+              <div key={preview.id} className={`${styles.transcriptionCard} ${preview.status === 'error' ? styles.transcriptionError : ''}`}>
+                <div className={styles.transcriptionHeader}>
+                  <span className={styles.transcriptionDate}>
+                    Bugun · {preview.timestamp.toLocaleTimeString('uz-UZ', { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
+                <div className={styles.transcriptionTitle}>
+                  {preview.status === 'transcribing' ? (
+                    <>
+                      <span>Yangi yozuv</span>
+                      <span className={styles.transcribingBadge}>
+                        <span className={styles.transcribingDot} />
+                        Transcribing
+                      </span>
+                    </>
+                  ) : preview.status === 'done' ? (
+                    <span>{preview.remindersCreated} ta eslatma yaratildi ✓</span>
+                  ) : (
+                    <span>Xatolik</span>
+                  )}
+                </div>
+                {preview.transcription && (
+                  <p className={styles.transcriptionText}>{preview.transcription}</p>
+                )}
+                <div className={styles.transcriptionFooter}>
+                  <button className={styles.playButton}>
+                    <Play size={14} fill="currentColor" />
+                    <span>{preview.duration}</span>
+                  </button>
+                  <div className={styles.transcriptionActions}>
+                    {preview.status === 'done' && (
+                      <button className={styles.actionButton}>
+                        <Send size={18} />
+                      </button>
+                    )}
+                    <button 
+                      className={styles.actionButton}
+                      onClick={() => dismissPreview(preview.id)}
+                    >
+                      <MoreHorizontal size={18} />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
         {Object.entries(groupedReminders).map(([date, reminders]) => (
           <div key={date} className={styles.reminderGroup}>
             <div className={styles.dateHeader}>
