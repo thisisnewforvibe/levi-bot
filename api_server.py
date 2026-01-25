@@ -629,7 +629,7 @@ async def transcribe_audio_elevenlabs(file_path: str, language: str = "uz") -> O
 
 # ===== Gemini AI Parsing =====
 async def parse_with_gemini(text: str, user_timezone: str = DEFAULT_TIMEZONE) -> List[dict]:
-    """Use Gemini AI to parse reminder text."""
+    """Use Gemini AI to parse reminder text - same logic as Telegram bot."""
     if not gemini_model:
         logger.warning("Gemini not available")
         return []
@@ -637,38 +637,77 @@ async def parse_with_gemini(text: str, user_timezone: str = DEFAULT_TIMEZONE) ->
     try:
         now_utc = datetime.utcnow()
         
-        prompt = f"""You are a smart reminder assistant. Parse the following text and extract reminder tasks.
+        # Use the same comprehensive prompt as gemini_parser.py
+        prompt = f"""Siz O'zbekiston foydalanuvchilari uchun aqlli eslatma yordamchisisiz. Quyidagi matnni tahlil qiling va eslatma vazifalarini ajratib oling.
 
-Current date and time (UTC): {now_utc.strftime('%Y-%m-%d %H:%M')}
-User timezone: {user_timezone}
+Hozirgi sana va vaqt (UTC): {now_utc.strftime('%Y-%m-%d %H:%M')}
+Foydalanuvchi vaqt zonasi: {user_timezone}
 
-Text: "{text}"
+Matn: "{text}"
 
-Extract ALL reminders. For each reminder determine:
-1. Task description (short, action-oriented)
-2. Scheduled time in UTC (ISO format: YYYY-MM-DD HH:MM)
-3. Notes/details (items to buy, things to remember)
-4. Location (if mentioned)
-5. Recurrence type: "daily", "weekly", "weekdays", "monthly", or null
-6. Recurrence time (HH:MM in user's timezone)
+MUHIM QOIDALAR:
+1. BARCHA javoblarni O'ZBEK TILIDA yozing!
+2. Inglizcha so'zlarni O'ZBEK TILIGA tarjima qiling!
+3. Vazifa tavsifi qisqa va harakat yo'naltirilgan bo'lsin
 
-Time parsing rules:
-- "har kuni" = daily, "har hafta" = weekly, "har oy" = monthly
-- "ertalab" = 8:00 AM, "kechqurun" = 6:00 PM
-- "ertaga" = tomorrow at 9:00 AM
-- "5 minut" = 5 minutes from now
-- Numbers: "o'n" = 10, "to'qqiz" = 9, "sakkiz" = 8
+Har bir eslatma uchun aniqlang:
+1. Vazifa tavsifi (qisqa, O'ZBEK TILIDA) - masalan: "Kitob o'qish", "Dori ichish", "Uyga qaytish"
+2. Rejalashtirilgan vaqt UTC formatida (ISO: YYYY-MM-DD HH:MM)
+3. Izohlar/tafsilotlar
+4. Joylashuv (agar aytilgan bo'lsa)
+5. Takrorlanish turi: "daily", "weekly", "weekdays", "monthly" yoki null
+6. Takrorlanish vaqti (HH:MM foydalanuvchi vaqt zonasida)
 
-Return ONLY a JSON array:
+TARJIMA QOIDALARI:
+- "return home" = "Uyga qaytish"
+- "read book" / "read" = "Kitob o'qish"
+- "take medicine" = "Dori ichish"
+- "go to store" / "shopping" = "Do'konga borish"
+- "call" = "Qo'ng'iroq qilish"
+- "meet" / "meeting" = "Uchrashuv"
+- "exercise" / "workout" = "Mashq qilish"
+- "study" = "O'qish"
+- "work" = "Ishlash"
+- "cook" = "Ovqat tayyorlash"
+- "clean" = "Tozalash"
+- "sleep" = "Uxlash"
+- "wake up" = "Uyg'onish"
+
+VAQTNI TAHLIL QILISH QOIDALARI:
+O'zbek raqamlari:
+- "bir" = 1, "ikki" = 2, "uch" = 3, "to'rt" = 4, "besh" = 5
+- "olti" = 6, "yetti" = 7, "sakkiz" = 8, "to'qqiz" = 9, "o'n" = 10
+- "o'n bir" = 11, "o'n ikki" = 12
+
+Vaqt iboralari:
+- "soat o'n da" / "soat 10 da" = 10:00
+- "ertalab" = 8:00 AM (agar aniq vaqt berilmagan bo'lsa)
+- "kechqurun" / "oqshom" = 18:00 (agar aniq vaqt berilmagan bo'lsa)
+- "tushlik" = 13:00
+- "ertaga" = ertangi kun soat 9:00
+- "bugun" = bugungi kun
+- "5 minut" / "5 daqiqa" / "besh minutdan keyin" = 5 daqiqadan keyin
+- "yarim soat" = 30 daqiqadan keyin
+- "bir soatdan keyin" = 1 soatdan keyin
+
+Takrorlanish:
+- "har kuni" = daily
+- "har hafta" = weekly
+- "har oy" = monthly
+- "ish kunlari" = weekdays
+
+Faqat JSON massivini qaytaring:
 [
-  {{"task": "task description", "time_utc": "2026-01-22 14:00", "notes": "note text or null", "location": "place or null", "recurrence_type": "daily or null", "recurrence_time": "09:00 or null"}}
+  {{"task": "vazifa O'ZBEK TILIDA", "time_utc": "2026-01-25 14:00", "notes": "izoh yoki null", "location": "joy yoki null", "recurrence_type": null, "recurrence_time": null}}
 ]
 
-If not a reminder, return: []
+Agar eslatma bo'lmasa: []
 """
         
         response = gemini_model.generate_content(prompt)
         result_text = response.text.strip()
+        
+        logger.info(f"Gemini raw response: {result_text[:500]}")
         
         # Extract JSON
         if "```json" in result_text:
@@ -677,7 +716,41 @@ If not a reminder, return: []
             result_text = result_text.split("```")[1].split("```")[0].strip()
         
         reminders = json.loads(result_text)
-        return reminders if isinstance(reminders, list) else []
+        
+        if not isinstance(reminders, list):
+            return []
+        
+        # Process reminders - handle past times
+        processed = []
+        for r in reminders:
+            if not isinstance(r, dict) or 'task' not in r or 'time_utc' not in r:
+                continue
+            
+            time_str = r.get('time_utc', '')
+            try:
+                scheduled_time = datetime.strptime(time_str, '%Y-%m-%d %H:%M')
+                
+                # If time is in the past for non-recurring, skip
+                if scheduled_time <= now_utc and not r.get('recurrence_type'):
+                    logger.warning(f"Skipping past time: {time_str}")
+                    continue
+                
+                # For recurring reminders with past times, schedule for next occurrence
+                if scheduled_time <= now_utc and r.get('recurrence_type'):
+                    recurrence = r.get('recurrence_type')
+                    if recurrence == 'daily':
+                        scheduled_time = scheduled_time + timedelta(days=1)
+                    elif recurrence == 'weekly':
+                        scheduled_time = scheduled_time + timedelta(weeks=1)
+                    r['time_utc'] = scheduled_time.strftime('%Y-%m-%d %H:%M')
+                    logger.info(f"Rescheduled recurring reminder to: {r['time_utc']}")
+                
+                processed.append(r)
+            except ValueError as e:
+                logger.error(f"Failed to parse time '{time_str}': {e}")
+                continue
+        
+        return processed
     
     except Exception as e:
         logger.error(f"Gemini parsing error: {e}")
@@ -1065,10 +1138,13 @@ async def create_reminder_from_voice(
         # Create all reminders
         created_reminders = []
         for r in parsed_reminders:
+            # Use original transcription as notes if no specific notes provided
+            notes = r.get('notes') or transcription
+            
             reminder_data = ReminderCreate(
                 task_text=r.get('task', ''),
                 scheduled_time=r.get('time_utc', ''),
-                notes=r.get('notes'),
+                notes=notes,
                 location=r.get('location'),
                 recurrence_type=r.get('recurrence_type'),
                 recurrence_time=r.get('recurrence_time')
