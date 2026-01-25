@@ -15,11 +15,14 @@ const config: CapacitorConfig = {
     LocalNotifications: {
       smallIcon: 'ic_stat_icon_config_sample',
       iconColor: '#1A1A1A',
-      sound: 'beep.wav'
+      // Alarm-style sound (louder, more persistent)
+      sound: 'alarm.wav'
     }
   },
   android: {
-    allowMixedContent: true
+    allowMixedContent: true,
+    // Enable exact alarms for precise reminder timing
+    useLegacyBridge: false
   }
 };
 

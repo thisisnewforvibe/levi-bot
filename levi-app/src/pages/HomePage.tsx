@@ -4,6 +4,7 @@ import { Search, Play, Check, User, Loader2, Send, MoreHorizontal } from 'lucide
 import styles from './HomePage.module.css'
 import RecordingModal from '../components/RecordingModal'
 import { voiceAPI, remindersAPI, Reminder as APIReminder } from '../services/api'
+import { notificationService, reminderToAlarm } from '../services/notifications'
 
 interface TranscriptionPreview {
   id: string
@@ -91,8 +92,35 @@ export default function HomePage() {
       if (mapped.length > 0) {
         setReminders(mapped)
       }
+      
+      // Schedule alarms for all pending reminders
+      const pendingReminders = apiReminders.filter(r => r.status === 'pending')
+      await scheduleAlarmsForReminders(pendingReminders)
     } catch (error) {
       console.error('Failed to load reminders:', error)
+    }
+  }
+
+  // Schedule alarm notifications for reminders
+  const scheduleAlarmsForReminders = async (apiReminders: APIReminder[]) => {
+    try {
+      // Cancel existing alarms first to avoid duplicates
+      await notificationService.cancelAllAlarms()
+      
+      // Schedule alarms for future reminders only
+      const now = new Date()
+      const futureReminders = apiReminders.filter(r => {
+        const scheduledTime = new Date(r.scheduled_time_utc)
+        return scheduledTime > now
+      })
+
+      if (futureReminders.length > 0) {
+        const alarms = futureReminders.map(r => reminderToAlarm(r))
+        await notificationService.scheduleMultipleAlarms(alarms)
+        console.log(`Scheduled ${alarms.length} alarm notifications`)
+      }
+    } catch (error) {
+      console.error('Failed to schedule alarms:', error)
     }
   }
 
@@ -146,6 +174,13 @@ export default function HomePage() {
       if (result.success && result.reminders) {
         console.log('Transcription:', result.transcription)
         console.log('Created reminders:', result.reminders)
+        
+        // Schedule alarm notifications for new reminders
+        if (result.reminders && result.reminders.length > 0) {
+          const alarms = result.reminders.map(r => reminderToAlarm(r))
+          await notificationService.scheduleMultipleAlarms(alarms)
+          console.log(`Scheduled ${alarms.length} alarm(s) for new reminders`)
+        }
         
         // Update preview with transcription
         setTranscriptionPreviews(prev => 
@@ -273,7 +308,7 @@ export default function HomePage() {
                       <span>Yangi yozuv</span>
                       <span className={styles.transcribingBadge}>
                         <span className={styles.transcribingDot} />
-                        Transcribing
+                        Qayta ishlanmoqda
                       </span>
                     </>
                   ) : preview.status === 'done' ? (
@@ -352,7 +387,7 @@ export default function HomePage() {
           ) : (
             <>
               <div className={styles.recordDot} />
-              <span>Record</span>
+              <span>Yozib olish</span>
             </>
           )}
         </button>

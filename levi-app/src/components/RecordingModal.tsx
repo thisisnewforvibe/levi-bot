@@ -22,6 +22,7 @@ export default function RecordingModal({ isOpen, onClose, onStop }: RecordingMod
   const analyserRef = useRef<AnalyserNode | null>(null)
   const audioContextRef = useRef<AudioContext | null>(null)
   const elapsedTimeRef = useRef(0)
+  const isCancelledRef = useRef(false)
 
   const maxDuration = 120 // 2 minutes in seconds
 
@@ -128,6 +129,11 @@ export default function RecordingModal({ isOpen, onClose, onStop }: RecordingMod
       }
 
       mediaRecorder.onstop = () => {
+        // Don't call onStop if cancelled
+        if (isCancelledRef.current) {
+          cleanup()
+          return
+        }
         const audioBlob = new Blob(audioChunksRef.current, { type: mimeType })
         const finalDuration = elapsedTimeRef.current
         onStop(audioBlob, finalDuration)
@@ -167,6 +173,8 @@ export default function RecordingModal({ isOpen, onClose, onStop }: RecordingMod
     setElapsedTime(0)
     setIsPaused(false)
     setWaveformBars(Array(50).fill(2))
+    isCancelledRef.current = false
+    elapsedTimeRef.current = 0
   }
 
   const formatTime = (seconds: number) => {
@@ -195,7 +203,13 @@ export default function RecordingModal({ isOpen, onClose, onStop }: RecordingMod
   }
 
   const handleCancel = () => {
-    cleanup()
+    isCancelledRef.current = true
+    // Stop the recorder which will trigger onstop, but isCancelledRef will prevent onStop callback
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop()
+    } else {
+      cleanup()
+    }
     onClose()
   }
 
