@@ -636,6 +636,10 @@ async def parse_with_gemini(text: str, user_timezone: str = DEFAULT_TIMEZONE) ->
     
     try:
         now_utc = datetime.utcnow()
+        logger.info(f"=== PARSE_WITH_GEMINI START ===")
+        logger.info(f"Current UTC time (server): {now_utc.strftime('%Y-%m-%d %H:%M:%S')}")
+        logger.info(f"User timezone: {user_timezone}")
+        logger.info(f"Input text: {text}")
         
         # Use the same comprehensive prompt as gemini_parser.py
         prompt = f"""Siz O'zbekiston foydalanuvchilari uchun aqlli eslatma yordamchisisiz. Quyidagi matnni tahlil qiling va eslatma vazifalarini ajratib oling.
@@ -708,6 +712,7 @@ Agar eslatma bo'lmasa: []
         result_text = response.text.strip()
         
         logger.info(f"Gemini raw response: {result_text[:500]}")
+        logger.info(f"Time after Gemini call: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}")
         
         # Extract JSON
         if "```json" in result_text:
@@ -727,8 +732,11 @@ Agar eslatma bo'lmasa: []
                 continue
             
             time_str = r.get('time_utc', '')
+            logger.info(f"Processing reminder: task='{r.get('task')}', time_utc='{time_str}'")
             try:
                 scheduled_time = datetime.strptime(time_str, '%Y-%m-%d %H:%M')
+                diff_seconds = (scheduled_time - now_utc).total_seconds()
+                logger.info(f"Scheduled time diff from now_utc: {diff_seconds:.0f} seconds ({diff_seconds/60:.1f} minutes)")
                 
                 # If time is in the past for non-recurring, skip
                 if scheduled_time <= now_utc and not r.get('recurrence_type'):
@@ -746,10 +754,12 @@ Agar eslatma bo'lmasa: []
                     logger.info(f"Rescheduled recurring reminder to: {r['time_utc']}")
                 
                 processed.append(r)
+                logger.info(f"FINAL scheduled_time_utc: {r['time_utc']}")
             except ValueError as e:
                 logger.error(f"Failed to parse time '{time_str}': {e}")
                 continue
         
+        logger.info(f"=== PARSE_WITH_GEMINI END - {len(processed)} reminders ===")
         return processed
     
     except Exception as e:
