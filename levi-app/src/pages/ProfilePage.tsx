@@ -1,23 +1,32 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ArrowLeft, User, Phone, Bell, Moon, HelpCircle, LogOut, ChevronRight } from 'lucide-react'
+import { ArrowLeft, User, Phone, Bell, Volume2, HelpCircle, LogOut, ChevronRight, Crown } from 'lucide-react'
 import styles from './ProfilePage.module.css'
+import { authAPI } from '../services/api'
 
 export default function ProfilePage() {
   const navigate = useNavigate()
   const [notifications, setNotifications] = useState(true)
-  const [darkMode, setDarkMode] = useState(false)
+  const [userName, setUserName] = useState('Foydalanuvchi')
+  const [userPhone, setUserPhone] = useState('')
 
-  // Mock user data
-  const user = {
-    name: 'Aziz',
-    phone: '+998 90 123 45 67',
-  }
+  // Load user data from localStorage
+  useEffect(() => {
+    try {
+      const userStr = localStorage.getItem('user')
+      if (userStr) {
+        const user = JSON.parse(userStr)
+        if (user.name) setUserName(user.name)
+        if (user.phone) setUserPhone(user.phone)
+      }
+    } catch (e) {
+      console.error('Failed to load user:', e)
+    }
+  }, [])
 
   const handleLogout = () => {
-    // TODO: Implement logout logic
-    console.log('Logout')
-    navigate('/register')
+    authAPI.logout()
+    navigate('/login')
   }
 
   return (
@@ -35,10 +44,10 @@ export default function ProfilePage() {
           <User size={32} />
         </div>
         <div className={styles.profileInfo}>
-          <h2 className={styles.userName}>{user.name}</h2>
-          <p className={styles.userPhone}>{user.phone}</p>
+          <h2 className={styles.userName}>{userName}</h2>
+          <p className={styles.userPhone}>{userPhone}</p>
         </div>
-        <button className={styles.editButton}>
+        <button className={styles.editButton} onClick={() => navigate('/edit-profile')}>
           Tahrirlash
         </button>
       </div>
@@ -47,7 +56,15 @@ export default function ProfilePage() {
       <div className={styles.section}>
         <h3 className={styles.sectionTitle}>SOZLAMALAR</h3>
         
-        <div className={styles.menuItem}>
+        <div className={styles.menuItem} onClick={() => navigate('/subscription')} style={{cursor: 'pointer'}}>
+          <div className={styles.menuIcon} style={{color: '#FFB800'}}>
+            <Crown size={20} />
+          </div>
+          <span className={styles.menuText}>Obuna</span>
+          <ChevronRight size={20} className={styles.menuArrow} />
+        </div>
+        
+        <div className={styles.menuItem} onClick={() => navigate('/personal-info')} style={{cursor: 'pointer'}}>
           <div className={styles.menuIcon}>
             <User size={20} />
           </div>
@@ -55,7 +72,7 @@ export default function ProfilePage() {
           <ChevronRight size={20} className={styles.menuArrow} />
         </div>
 
-        <div className={styles.menuItem}>
+        <div className={styles.menuItem} onClick={() => navigate('/change-phone')} style={{cursor: 'pointer'}}>
           <div className={styles.menuIcon}>
             <Phone size={20} />
           </div>
@@ -78,19 +95,12 @@ export default function ProfilePage() {
           </label>
         </div>
 
-        <div className={styles.menuItem}>
+        <div className={styles.menuItem} onClick={() => navigate('/alarm-settings')} style={{cursor: 'pointer'}}>
           <div className={styles.menuIcon}>
-            <Moon size={20} />
+            <Volume2 size={20} />
           </div>
-          <span className={styles.menuText}>Qorong'i rejim</span>
-          <label className={styles.toggle}>
-            <input
-              type="checkbox"
-              checked={darkMode}
-              onChange={(e) => setDarkMode(e.target.checked)}
-            />
-            <span className={styles.toggleSlider}></span>
-          </label>
+          <span className={styles.menuText}>Alarm ovozini sozlash</span>
+          <ChevronRight size={20} className={styles.menuArrow} />
         </div>
       </div>
 
@@ -98,7 +108,7 @@ export default function ProfilePage() {
       <div className={styles.section}>
         <h3 className={styles.sectionTitle}>YORDAM</h3>
         
-        <div className={styles.menuItem}>
+        <div className={styles.menuItem} onClick={() => navigate('/help-center')} style={{cursor: 'pointer'}}>
           <div className={styles.menuIcon}>
             <HelpCircle size={20} />
           </div>

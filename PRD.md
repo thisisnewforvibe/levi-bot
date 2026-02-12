@@ -1,9 +1,9 @@
 # Product Requirements Document (PRD)
 ## Voice Reminder Telegram Bot for Uzbekistan
 
-**Version:** 2.0  
-**Last Updated:** January 18, 2026  
-**Status:** Production Ready (Bot) + Mobile App Beta  
+**Version:** 2.1  
+**Last Updated:** January 25, 2026  
+**Status:** Production Ready (Bot) + Mobile App v3.4 (Native Alarms Working)  
 **Target Market:** Uzbekistan (Uzbek and Russian speakers)
 
 ---
@@ -1543,19 +1543,231 @@ npx cap sync android # Sync to Android
 npx cap open android # Open in Android Studio
 ```
 
-### 17.11 Pending Features
+### 17.11 Native Alarm Implementation (CRITICAL)
+
+**Status:** ✅ Implemented (v3.4)  
+**Last Updated:** January 25, 2026
+
+This section documents the complete native alarm system implementation. **READ THIS CAREFULLY** if continuing work on alarms.
+
+#### 17.11.1 The Problem
+
+Capacitor LocalNotifications plugin does NOT work as true alarms:
+- No sound when app is in background/closed
+- No automatic vibration
+- No bypass of Doze mode
+- Silenced by Do Not Disturb
+
+**User Requirement:** "Alarms MUST work automatically without user configuring anything!"
+
+#### 17.11.2 The Solution: Native Android AlarmManager
+
+We created custom native Android plugins that use `setAlarmClock()` for **guaranteed exact timing**.
+
+**Key Files:**
+
+| File | Location | Purpose |
+|------|----------|---------|
+| `AlarmReceiver.java` | `android/app/src/main/java/com/levi/reminders/` | BroadcastReceiver that plays alarm sound and shows notification |
+| `LeviAlarmManagerPlugin.java` | Same folder | Capacitor plugin to schedule alarms via AlarmManager |
+| `LeviAlarmPlugin.java` | Same folder | Capacitor plugin for play/stop alarm sound |
+| `notifications.ts` | `src/services/` | TypeScript service for scheduling |
+| `leviAlarm.ts` | `src/services/` | TypeScript interface for native plugins |
+
+#### 17.11.3 How AlarmReceiver.java Works
+
+```java
+// Key methods in AlarmReceiver.java:
+
+onReceive(context, intent)  // Called when alarm fires
+  → acquireWakeLock()       // Keep device awake
+  → playAlarmSound()        // Play system alarm at MAX volume
+  → vibrateDevice()         // Vibrate pattern
+  → showNotification()      // Show notification with action buttons
+
+playAlarmSound(context)
+  → Uses RingtoneManager.TYPE_ALARM
+  → Sets AudioManager to max volume
+  → Loops until stopped
+
+showNotification()
+  → Creates notification with 3 action buttons:
+    - "✓ Done" → Marks reminder as done
+    - "⏰ Snooze" → Reschedules +10 minutes  
+    - "⏹ Stop" → Just stops the alarm
+```
+
+#### 17.11.4 How LeviAlarmManagerPlugin.java Works
+
+```java
+// Key methods:
+
+canScheduleExactAlarms()   // Check if permission granted (Android 12+)
+openAlarmSettings()        // Open system settings for permission
+scheduleMultiple(alarms)   // Schedule multiple alarms at once
+scheduleNativeAlarm()      // Internal method using setAlarmClock()
+
+// CRITICAL: Uses setAlarmClock() NOT setExactAndAllowWhileIdle()
+// setAlarmClock() is the ONLY method that:
+// - Bypasses Doze mode completely
+// - Shows alarm icon in status bar
+// - Fires at EXACT time (not delayed by battery optimization)
+```
+
+#### 17.11.5 AndroidManifest.xml Permissions
+
+```xml
+<!-- Required permissions in AndroidManifest.xml -->
+<uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+<uses-permission android:name="android.permission.USE_EXACT_ALARM" />
+<uses-permission android:name="android.permission.VIBRATE" />
+<uses-permission android:name="android.permission.WAKE_LOCK" />
+<uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+<uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+<!-- Receiver registration -->
+<receiver 
+    android:name=".AlarmReceiver"
+    android:exported="false"
+    android:enabled="true">
+    <intent-filter>
+        <action android:name="com.levi.reminders.ALARM_TRIGGER" />
+    </intent-filter>
+</receiver>
+```
+
+#### 17.11.6 TypeScript Integration
+
+**leviAlarm.ts** - Defines the Capacitor plugin interfaces:
+```typescript
+// LeviAlarm - For playing/stopping alarm sound manually
+interface LeviAlarmPlugin {
+  playAlarm(): Promise<{ success: boolean }>;
+  stopAlarm(): Promise<{ success: boolean }>;
+}
+
+// LeviAlarmManager - For scheduling alarms
+interface LeviAlarmManagerPlugin {
+  canScheduleExactAlarms(): Promise<{ canSchedule: boolean; androidVersion: number }>;
+  openAlarmSettings(): Promise<{ opened: boolean }>;
+  scheduleMultiple(options: { alarms: NativeAlarm[] }): Promise<{ scheduled: number }>;
+  cancelAlarm(options: { id: number }): Promise<{ success: boolean }>;
+}
+```
+
+**notifications.ts** - `scheduleMultipleAlarms()` method:
+```typescript
+async scheduleMultipleAlarms(alarms: AlarmData[]): Promise<boolean> {
+  // Filter out past alarms
+  const now = Date.now();
+  const futureAlarms = alarms.filter(a => a.scheduledTime.getTime() > now + 10000);
+  
+  // Convert to native format
+  const nativeAlarms = futureAlarms.map(alarm => ({
+    id: alarm.id,
+    title: '🔔 Eslatma',
+    body: alarm.body,
+    triggerTime: alarm.scheduledTime.getTime(),
+  }));
+  
+  // Send to native AlarmManager
+  await LeviAlarmManager.scheduleMultiple({ alarms: nativeAlarms });
+}
+```
+
+#### 17.11.7 Critical Bugs Fixed
+
+| Version | Bug | Root Cause | Fix |
+|---------|-----|------------|-----|
+| v3.1 | Alarm 2 minutes late | Used `setAndAllowWhileIdle()` | Changed to `setAlarmClock()` |
+| v3.2 | No sound on some devices | AudioManager not set to max | Added `setStreamVolume(STREAM_ALARM, maxVolume)` |
+| v3.3 | Alarms fire immediately | Duplicate scheduling: both Capacitor AND native | Removed Capacitor backup scheduling |
+| v3.4 | Same as v3.3 | Also: Capacitor listener was calling `playAlarm()` | Removed auto-play from listener; Added 5-second minimum check in Java |
+
+#### 17.11.8 Current Flow (v3.4)
+
+1. **User records voice** → API creates reminder with `scheduled_time_utc`
+2. **`loadReminders()`** → Fetches all pending reminders from API
+3. **`scheduleAlarmsForReminders()`** → Filters to future reminders (>10 seconds)
+4. **`scheduleMultipleAlarms()`** → Sends to native `LeviAlarmManager.scheduleMultiple()`
+5. **Java `scheduleNativeAlarm()`** → Validates time (>5 seconds future), calls `setAlarmClock()`
+6. **At scheduled time** → Android triggers `AlarmReceiver.onReceive()`
+7. **`AlarmReceiver`** → Plays alarm sound, vibrates, shows notification
+8. **User taps action button** → Stops alarm, updates reminder status
+
+#### 17.11.9 Permission Handling (Android 12+)
+
+Android 12+ requires explicit permission for exact alarms. The app:
+1. Checks `canScheduleExactAlarms()` on HomePage mount
+2. Shows yellow warning banner if permission not granted
+3. User taps banner → Opens system settings via `openAlarmSettings()`
+4. User enables "Levi" in Alarms & Reminders settings
+
+**Note:** `USE_EXACT_ALARM` permission (for alarm clock apps) auto-grants but Play Store may require justification.
+
+#### 17.11.10 Known Limitations
+
+1. **No "Cancel All" for native alarms** - Android doesn't provide this; must track IDs
+2. **Boot persistence** - Alarms are lost on device reboot (TODO: implement BootReceiver)
+3. **Snooze from notification** - Works, but uses AlarmManager again
+4. **Battery optimization** - User should disable "Battery Optimization" for Levi
+
+#### 17.11.11 Debugging Tips
+
+**View logs:**
+```bash
+adb logcat -s LeviAlarm:V LeviAlarmManager:V AlarmReceiver:V
+```
+
+**Key log messages to look for:**
+```
+LeviAlarmManager: Scheduling alarm: now=X, trigger=Y, diff=Zms
+LeviAlarmManager: ✓ Scheduled alarm N using setAlarmClock (fires in X seconds)
+LeviAlarmManager: ⚠️ SKIPPING alarm N - trigger time is in the past
+AlarmReceiver: Alarm triggered! ID: N
+AlarmReceiver: Playing alarm sound...
+```
+
+**If alarm fires immediately:**
+- Check that `scheduled_time_utc` from API is in the FUTURE
+- Check that timezone conversion is correct
+- Look for duplicate scheduling with different timestamps
+
+#### 17.11.12 APK Versions History
+
+| Version | Date | Changes |
+|---------|------|---------|
+| v3.0 | Jan 24 | Initial native AlarmReceiver implementation |
+| v3.1 | Jan 24 | Added action buttons (Done/Snooze/Stop) |
+| v3.2 | Jan 25 | Fixed: use `setAlarmClock()` for exact timing |
+| v3.3 | Jan 25 | Added permission check UI, removed test button |
+| v3.4 | Jan 25 | Fixed immediate trigger bug (removed duplicate scheduling, added time validation) |
+
+---
+
+### 17.12 Pending Features
 
 **Voice Recording:**
-- [ ] Implement actual audio capture
-- [ ] Send to Aisha STT API
-- [ ] Process response and create reminder
+- [x] Implement actual audio capture
+- [x] Send to Aisha STT API  
+- [x] Process response and create reminder
+
+**Alarm System:**
+- [x] Native Android AlarmManager integration
+- [x] Alarm sound plays automatically
+- [x] Action buttons (Done/Snooze/Stop)
+- [x] Exact alarm permission handling
+- [ ] Boot persistence (reschedule after reboot)
+- [ ] Do Not Disturb bypass (needs notification policy access)
 
 **Backend Deployment:**
-- [ ] Deploy FastAPI server (Lightsail or Railway)
-- [ ] Configure HTTPS/SSL
-- [ ] Connect mobile app to production API
+- [x] Deploy FastAPI server on Railway
+- [x] Configure HTTPS/SSL
+- [x] Connect mobile app to production API
 
 **Authentication:**
+- [x] Basic phone/password login
 - [ ] Implement OTP verification (SMS)
 - [ ] Social login options
 - [ ] Biometric authentication
@@ -1565,7 +1777,7 @@ npx cap open android # Open in Android Studio
 - [ ] Sign APK for Play Store
 - [ ] Create app listing and screenshots
 
-### 17.12 Design System
+### 17.13 Design System
 
 **Colors:**
 ```css

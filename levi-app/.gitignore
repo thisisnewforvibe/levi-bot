@@ -28,3 +28,10 @@ Thumbs.db
 android/app/build/
 android/.gradle/
 android/build/
+android/capacitor-cordova-android-plugins/build/
+
+# iOS build outputs
+ios/App/Pods/
+ios/App/App/public/
+ios/App/build/
+ios/DerivedData/

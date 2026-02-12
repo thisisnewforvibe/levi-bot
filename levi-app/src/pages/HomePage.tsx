@@ -1,19 +1,14 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Search, Play, Check, User, Loader2, Send, MoreHorizontal } from 'lucide-react'
+import { Search, Check, User, Loader2 } from 'lucide-react'
 import styles from './HomePage.module.css'
 import RecordingModal from '../components/RecordingModal'
+import SubscriptionModal from '../components/SubscriptionModal'
 import { voiceAPI, remindersAPI, Reminder as APIReminder } from '../services/api'
 import { notificationService, reminderToAlarm } from '../services/notifications'
-
-interface TranscriptionPreview {
-  id: string
-  status: 'transcribing' | 'done' | 'error'
-  transcription?: string
-  duration: string
-  timestamp: Date
-  remindersCreated?: number
-}
+import { LeviAlarmManager, checkOverlayPermission, requestOverlayPermission } from '../services/leviAlarm'
+import { App } from '@capacitor/app'
+import { Capacitor } from '@capacitor/core'
 
 interface Reminder {
   id: string
@@ -29,40 +24,6 @@ interface Reminder {
   recurrence_type?: string
 }
 
-// Mock data for demonstration
-const initialReminders: Reminder[] = [
-  {
-    id: '1',
-    title: 'Darsga borish',
-    description: 'Bugun soat 15:30 da darsga borishim kerak, matematika darsi bo\'ladi.',
-    duration: '00:13',
-    date: 'Bugun',
-    time: '13:18',
-    isToday: true,
-    isDone: false,
-  },
-  {
-    id: '2',
-    title: 'Dorixonaga borish',
-    description: 'Ertaga ertalab dorixonaga borib, dori olishim kerak. Aspirin va vitamin D.',
-    duration: '00:08',
-    date: 'Kecha',
-    time: '16:31',
-    isToday: false,
-    isDone: false,
-  },
-  {
-    id: '3',
-    title: 'Namoz o\'qish',
-    description: 'Peshin namozini o\'qishni unutma.',
-    duration: '00:05',
-    date: 'Kecha',
-    time: '12:00',
-    isToday: false,
-    isDone: false,
-  },
-]
-
 type FilterType = 'all' | 'pending' | 'done'
 
 export default function HomePage() {
@@ -71,8 +32,12 @@ export default function HomePage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [isRecording, setIsRecording] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
-  const [reminders, setReminders] = useState<Reminder[]>(initialReminders)
-  const [transcriptionPreviews, setTranscriptionPreviews] = useState<TranscriptionPreview[]>([])
+  const [reminders, setReminders] = useState<Reminder[]>([])
+  const [successMessage, setSuccessMessage] = useState<string | null>(null)
+  const [userName, setUserName] = useState('Foydalanuvchi')
+  const [alarmPermissionNeeded, setAlarmPermissionNeeded] = useState(false)
+  const [overlayPermissionNeeded, setOverlayPermissionNeeded] = useState(false)
+  const [showSubscriptionModal, setShowSubscriptionModal] = useState(false)
 
   const filters: { key: FilterType; label: string }[] = [
     { key: 'all', label: 'Hammasi' },
@@ -80,18 +45,115 @@ export default function HomePage() {
     { key: 'done', label: 'Bajarildi' },
   ]
 
-  // Load reminders from API on mount
+  // Recheck permissions when app resumes (after returning from settings)
   useEffect(() => {
+    const listener = App.addListener('appStateChange', async ({ isActive }) => {
+      if (isActive && Capacitor.getPlatform() === 'android') {
+        // Recheck overlay permission (Android only)
+        const hasOverlay = await checkOverlayPermission()
+        if (hasOverlay) {
+          setOverlayPermissionNeeded(false)
+        }
+        // Recheck alarm permission (Android only)
+        try {
+          const result = await LeviAlarmManager.canScheduleExactAlarms()
+          if (result.canSchedule) {
+            setAlarmPermissionNeeded(false)
+          }
+        } catch (e) {
+          console.error('Error rechecking alarm permission:', e)
+        }
+      }
+    })
+    
+    return () => {
+      listener.then(l => l.remove())
+    }
+  }, [])
+
+  // Check alarm permission and load data on mount
+  useEffect(() => {
+    // Android-only: Check exact alarm and overlay permissions
+    if (Capacitor.getPlatform() === 'android') {
+      const checkAlarmPermission = async () => {
+        try {
+          const result = await LeviAlarmManager.canScheduleExactAlarms()
+          console.log('Alarm permission check:', result)
+          if (!result.canSchedule) {
+            setAlarmPermissionNeeded(true)
+          }
+        } catch (e) {
+          console.error('Error checking alarm permission:', e)
+        }
+      }
+      checkAlarmPermission()
+      
+      const checkOverlay = async () => {
+        try {
+          const hasOverlay = await checkOverlayPermission()
+          console.log('Overlay permission check:', hasOverlay)
+          if (!hasOverlay) {
+            setOverlayPermissionNeeded(true)
+            
+            const overlayAsked = localStorage.getItem('overlayPermissionAsked')
+            if (!overlayAsked) {
+              localStorage.setItem('overlayPermissionAsked', 'true')
+              setTimeout(async () => {
+                alert('⚠️ To\'liq ekran eslatma uchun ruxsat kerak!\n\nSozlamalarda "Levi" ilovasini toping va "Boshqa ilovalar ustida ko\'rsatish" ni yoqing.')
+                await requestOverlayPermission()
+              }, 500)
+            }
+          }
+        } catch (e) {
+          console.error('Error checking overlay permission:', e)
+        }
+      }
+      checkOverlay()
+    }
+    
+    // Get user name from localStorage
+    try {
+      const userStr = localStorage.getItem('user')
+      if (userStr) {
+        const user = JSON.parse(userStr)
+        if (user.name) {
+          setUserName(user.name)
+        }
+      }
+    } catch (e) {
+      console.error('Failed to parse user:', e)
+    }
+    
     loadReminders()
   }, [])
+
+  // Handle opening alarm settings
+  const handleEnableAlarms = async () => {
+    try {
+      await LeviAlarmManager.openAlarmSettings()
+      setSuccessMessage('⚙️ Sozlamalarda "Levi" uchun ruxsat bering')
+      setTimeout(() => setSuccessMessage(null), 5000)
+    } catch (e) {
+      console.error('Error opening alarm settings:', e)
+    }
+  }
+
+  // Handle opening overlay settings
+  const handleEnableOverlay = async () => {
+    try {
+      await requestOverlayPermission()
+      setSuccessMessage('⚙️ "Boshqa ilovalar ustida ko\'rsatish" ni yoqing')
+      setTimeout(() => setSuccessMessage(null), 5000)
+    } catch (e) {
+      console.error('Error opening overlay settings:', e)
+    }
+  }
 
   const loadReminders = async () => {
     try {
       const apiReminders = await remindersAPI.getAll()
       const mapped = apiReminders.map((r: APIReminder) => mapAPIReminder(r))
-      if (mapped.length > 0) {
-        setReminders(mapped)
-      }
+      setReminders(mapped)
       
       // Schedule alarms for all pending reminders
       const pendingReminders = apiReminders.filter(r => r.status === 'pending')
@@ -105,19 +167,39 @@ export default function HomePage() {
   const scheduleAlarmsForReminders = async (apiReminders: APIReminder[]) => {
     try {
       // Cancel existing alarms first to avoid duplicates
+      console.log('Cancelling all existing alarms...')
       await notificationService.cancelAllAlarms()
       
       // Schedule alarms for future reminders only
+      // Must be at least 10 seconds in the future to avoid race conditions
       const now = new Date()
+      const minBufferMs = 10000  // 10 seconds minimum
+      console.log(`Current time: ${now.toLocaleString()} (timestamp: ${now.getTime()})`)
+      
       const futureReminders = apiReminders.filter(r => {
-        const scheduledTime = new Date(r.scheduled_time_utc)
-        return scheduledTime > now
+        // Ensure UTC time is parsed correctly
+        let utcTimeStr = r.scheduled_time_utc
+        if (!utcTimeStr.endsWith('Z') && !utcTimeStr.includes('+')) {
+          utcTimeStr = utcTimeStr + 'Z'
+        }
+        const scheduledTime = new Date(utcTimeStr)
+        const diffMs = scheduledTime.getTime() - now.getTime()
+        const isFuture = diffMs > minBufferMs  // Must be more than 10 seconds in future
+        console.log(`Reminder ${r.id}: "${r.task_text}"`)
+        console.log(`  - UTC string: ${r.scheduled_time_utc}`)
+        console.log(`  - Parsed time: ${scheduledTime.toLocaleString()} (timestamp: ${scheduledTime.getTime()})`)
+        console.log(`  - Diff: ${diffMs}ms (${Math.round(diffMs/1000)}s, ${Math.round(diffMs/60000)}min)`)
+        console.log(`  - Is future (>10s): ${isFuture}`)
+        return isFuture
       })
 
       if (futureReminders.length > 0) {
         const alarms = futureReminders.map(r => reminderToAlarm(r))
+        console.log(`Scheduling ${alarms.length} alarms with native AlarmManager...`)
         await notificationService.scheduleMultipleAlarms(alarms)
-        console.log(`Scheduled ${alarms.length} alarm notifications`)
+        console.log(`✓ Scheduled ${alarms.length} alarm notifications`)
+      } else {
+        console.log('No future reminders to schedule (all are past or too close)')
       }
     } catch (error) {
       console.error('Failed to schedule alarms:', error)
@@ -125,23 +207,66 @@ export default function HomePage() {
   }
 
   const mapAPIReminder = (r: APIReminder): Reminder => {
-    const scheduledDate = new Date(r.scheduled_time_utc)
+    // Ensure the UTC time is parsed correctly by adding Z suffix if not present
+    let utcTimeStr = r.scheduled_time_utc
+    if (!utcTimeStr.endsWith('Z') && !utcTimeStr.includes('+')) {
+      utcTimeStr = utcTimeStr + 'Z'
+    }
+    const scheduledDate = new Date(utcTimeStr)
     const now = new Date()
     const isToday = scheduledDate.toDateString() === now.toDateString()
+    
+    // Get yesterday's date
+    const yesterday = new Date()
+    yesterday.setDate(yesterday.getDate() - 1)
+    const isYesterday = scheduledDate.toDateString() === yesterday.toDateString()
+    
+    // Format date text
+    let dateText = scheduledDate.toLocaleDateString('uz-UZ')
+    if (isToday) {
+      dateText = 'Bugun'
+    } else if (isYesterday) {
+      dateText = 'Kecha'
+    }
     
     return {
       id: String(r.id),
       title: r.task_text,
-      description: r.task_text,
+      description: r.notes || r.task_text,
       duration: '00:00',
-      date: isToday ? 'Bugun' : scheduledDate.toLocaleDateString('uz-UZ'),
+      date: dateText,
       time: scheduledDate.toLocaleTimeString('uz-UZ', { hour: '2-digit', minute: '2-digit' }),
       isToday,
       isDone: r.status === 'done',
     }
   }
 
+  // Check if user has active subscription
+  const isSubscribed = (): boolean => {
+    try {
+      const sub = localStorage.getItem('subscription')
+      if (sub) {
+        const { active } = JSON.parse(sub)
+        return active === true
+      }
+    } catch (e) {
+      console.error('Failed to check subscription:', e)
+    }
+    return false
+  }
+
+  // Count pending (non-done) reminders
+  const getPendingReminderCount = (): number => {
+    return reminders.filter(r => !r.isDone).length
+  }
+
   const handleRecordClick = () => {
+    // Check subscription - only 1 free reminder allowed
+    const pendingCount = getPendingReminderCount()
+    if (pendingCount >= 1 && !isSubscribed()) {
+      setShowSubscriptionModal(true)
+      return
+    }
     setIsRecording(true)
   }
 
@@ -154,19 +279,6 @@ export default function HomePage() {
     setIsRecording(false)
     setIsProcessing(true)
 
-    // Create a transcription preview card immediately
-    const previewId = Date.now().toString()
-    const durationStr = formatDuration(duration)
-    
-    const newPreview: TranscriptionPreview = {
-      id: previewId,
-      status: 'transcribing',
-      duration: durationStr,
-      timestamp: new Date(),
-    }
-    
-    setTranscriptionPreviews(prev => [newPreview, ...prev])
-
     try {
       // Send audio to voice API
       const result = await voiceAPI.createFromVoice(audioBlob, 'uz')
@@ -175,63 +287,56 @@ export default function HomePage() {
         console.log('Transcription:', result.transcription)
         console.log('Created reminders:', result.reminders)
         
-        // Schedule alarm notifications for new reminders
-        if (result.reminders && result.reminders.length > 0) {
-          const alarms = result.reminders.map(r => reminderToAlarm(r))
-          await notificationService.scheduleMultipleAlarms(alarms)
-          console.log(`Scheduled ${alarms.length} alarm(s) for new reminders`)
-        }
+        // Show success message
+        const count = result.reminders?.length || 0
+        setSuccessMessage(`✅ ${count} ta eslatma yaratildi!`)
         
-        // Update preview with transcription
-        setTranscriptionPreviews(prev => 
-          prev.map(p => p.id === previewId ? {
-            ...p,
-            status: 'done' as const,
-            transcription: result.transcription,
-            remindersCreated: result.reminders?.length || 0,
-          } : p)
-        )
+        // Auto-dismiss after 3 seconds
+        setTimeout(() => {
+          setSuccessMessage(null)
+        }, 3000)
         
         // Reload reminders from API
         await loadReminders()
       } else {
-        // Update preview with error
-        setTranscriptionPreviews(prev => 
-          prev.map(p => p.id === previewId ? {
-            ...p,
-            status: 'error',
-            transcription: result.message || 'Eslatma yaratib bo\'lmadi',
-          } : p)
-        )
+        // Show error message
+        setSuccessMessage(`❌ ${result.message || 'Eslatma yaratib bo\'lmadi'}`)
+        setTimeout(() => {
+          setSuccessMessage(null)
+        }, 3000)
       }
     } catch (error) {
       console.error('Voice processing failed:', error)
-      setTranscriptionPreviews(prev => 
-        prev.map(p => p.id === previewId ? {
-          ...p,
-          status: 'error',
-          transcription: 'Ovozni qayta ishlashda xatolik yuz berdi',
-        } : p)
-      )
+      setSuccessMessage('❌ Ovozni qayta ishlashda xatolik yuz berdi')
+      setTimeout(() => {
+        setSuccessMessage(null)
+      }, 3000)
     } finally {
       setIsProcessing(false)
     }
   }
 
-  const formatDuration = (seconds: number): string => {
-    const mins = Math.floor(seconds / 60)
-    const secs = Math.floor(seconds % 60)
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`
-  }
-
-  const dismissPreview = (id: string) => {
-    setTranscriptionPreviews(prev => prev.filter(p => p.id !== id))
-  }
-
-  const toggleReminderDone = (id: string) => {
+  const toggleReminderDone = async (id: string) => {
+    const reminder = reminders.find(r => r.id === id)
+    if (!reminder) return
+    
+    const newStatus = reminder.isDone ? 'pending' : 'done'
+    
+    // Update locally first for instant feedback
     setReminders(prev => 
       prev.map(r => r.id === id ? { ...r, isDone: !r.isDone } : r)
     )
+    
+    // Update on server
+    try {
+      await remindersAPI.updateStatus(Number(id), newStatus)
+    } catch (error) {
+      console.error('Failed to update reminder status:', error)
+      // Revert on error
+      setReminders(prev => 
+        prev.map(r => r.id === id ? { ...r, isDone: reminder.isDone } : r)
+      )
+    }
   }
 
   const filteredReminders = reminders.filter(r => {
@@ -251,17 +356,84 @@ export default function HomePage() {
     <div className={styles.container}>
       {/* Header */}
       <header className={styles.header}>
-        <h1 className={styles.title}>Levi</h1>
         <div className={styles.profileSection}>
           <div className={styles.greetingText}>
             <div className={styles.greetingLabel}>XUSH KELIBSIZ</div>
-            <div className={styles.greetingName}>Salom, Aziz</div>
+            <div className={styles.greetingName}>Salom, {userName}</div>
           </div>
           <button className={styles.profileButton} onClick={() => navigate('/profile')}>
             <User size={22} strokeWidth={1.5} />
           </button>
         </div>
       </header>
+
+      {/* Alarm Permission Warning */}
+      {alarmPermissionNeeded && (
+        <div style={{
+          background: '#ff4444',
+          color: 'white',
+          padding: '12px 16px',
+          margin: '0 16px 16px',
+          borderRadius: '8px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: '12px'
+        }}>
+          <span style={{ fontSize: '14px' }}>
+            ⚠️ Eslatmalar ishlashi uchun ruxsat kerak!
+          </span>
+          <button
+            onClick={handleEnableAlarms}
+            style={{
+              background: 'white',
+              color: '#ff4444',
+              border: 'none',
+              padding: '8px 16px',
+              borderRadius: '6px',
+              fontWeight: 'bold',
+              fontSize: '13px',
+              whiteSpace: 'nowrap'
+            }}
+          >
+            Yoqish
+          </button>
+        </div>
+      )}
+
+      {/* Overlay Permission Warning (for full-screen alarm) */}
+      {overlayPermissionNeeded && (
+        <div style={{
+          background: '#f59e0b',
+          color: 'white',
+          padding: '12px 16px',
+          margin: '0 16px 16px',
+          borderRadius: '8px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: '12px'
+        }}>
+          <span style={{ fontSize: '14px' }}>
+            📱 To'liq ekran eslatma uchun ruxsat kerak
+          </span>
+          <button
+            onClick={handleEnableOverlay}
+            style={{
+              background: 'white',
+              color: '#f59e0b',
+              border: 'none',
+              padding: '8px 16px',
+              borderRadius: '6px',
+              fontWeight: 'bold',
+              fontSize: '13px',
+              whiteSpace: 'nowrap'
+            }}
+          >
+            Yoqish
+          </button>
+        </div>
+      )}
 
       {/* Search */}
       <div className={styles.searchContainer}>
@@ -292,55 +464,10 @@ export default function HomePage() {
 
       {/* Reminders List */}
       <div className={styles.remindersList}>
-        {/* Transcription Previews */}
-        {transcriptionPreviews.length > 0 && (
-          <div className={styles.transcriptionSection}>
-            {transcriptionPreviews.map((preview) => (
-              <div key={preview.id} className={`${styles.transcriptionCard} ${preview.status === 'error' ? styles.transcriptionError : ''}`}>
-                <div className={styles.transcriptionHeader}>
-                  <span className={styles.transcriptionDate}>
-                    Bugun · {preview.timestamp.toLocaleTimeString('uz-UZ', { hour: '2-digit', minute: '2-digit' })}
-                  </span>
-                </div>
-                <div className={styles.transcriptionTitle}>
-                  {preview.status === 'transcribing' ? (
-                    <>
-                      <span>Yangi yozuv</span>
-                      <span className={styles.transcribingBadge}>
-                        <span className={styles.transcribingDot} />
-                        Qayta ishlanmoqda
-                      </span>
-                    </>
-                  ) : preview.status === 'done' ? (
-                    <span>{preview.remindersCreated} ta eslatma yaratildi ✓</span>
-                  ) : (
-                    <span>Xatolik</span>
-                  )}
-                </div>
-                {preview.transcription && (
-                  <p className={styles.transcriptionText}>{preview.transcription}</p>
-                )}
-                <div className={styles.transcriptionFooter}>
-                  <button className={styles.playButton}>
-                    <Play size={14} fill="currentColor" />
-                    <span>{preview.duration}</span>
-                  </button>
-                  <div className={styles.transcriptionActions}>
-                    {preview.status === 'done' && (
-                      <button className={styles.actionButton}>
-                        <Send size={18} />
-                      </button>
-                    )}
-                    <button 
-                      className={styles.actionButton}
-                      onClick={() => dismissPreview(preview.id)}
-                    >
-                      <MoreHorizontal size={18} />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ))}
+        {/* Success Message Toast */}
+        {successMessage && (
+          <div className={styles.successToast}>
+            <span>{successMessage}</span>
           </div>
         )}
 
@@ -355,10 +482,7 @@ export default function HomePage() {
                 <h3 className={styles.reminderTitle}>{reminder.title}</h3>
                 <p className={styles.reminderDescription}>{reminder.description}</p>
                 <div className={styles.reminderFooter}>
-                  <button className={styles.playButton}>
-                    <Play size={14} fill="currentColor" />
-                    <span>{reminder.duration}</span>
-                  </button>
+                  <span className={styles.reminderTime}>⏰ {reminder.time}</span>
                   <button 
                     className={`${styles.checkButton} ${reminder.isDone ? styles.checkButtonDone : ''}`}
                     onClick={() => toggleReminderDone(reminder.id)}
@@ -398,6 +522,16 @@ export default function HomePage() {
         isOpen={isRecording}
         onClose={handleRecordingClose}
         onStop={handleRecordingStop}
+      />
+
+      {/* Subscription Modal */}
+      <SubscriptionModal
+        isOpen={showSubscriptionModal}
+        onClose={() => setShowSubscriptionModal(false)}
+        onSubscribe={() => {
+          setShowSubscriptionModal(false)
+          navigate('/subscription')
+        }}
       />
     </div>
   )

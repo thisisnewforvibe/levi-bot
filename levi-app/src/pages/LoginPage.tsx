@@ -1,11 +1,14 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Eye, EyeOff } from 'lucide-react'
+import { Eye, EyeOff, Loader2 } from 'lucide-react'
 import styles from './LoginPage.module.css'
+import { authAPI } from '../services/api'
 
 export default function LoginPage() {
   const navigate = useNavigate()
   const [showPassword, setShowPassword] = useState(false)
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState('')
   const [formData, setFormData] = useState({
     phone: '',
     password: '',
@@ -16,13 +19,36 @@ export default function LoginPage() {
       ...prev,
       [e.target.name]: e.target.value
     }))
+    setError('')
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    // TODO: Implement login logic
-    console.log('Login:', formData)
-    navigate('/')
+    setIsLoading(true)
+    setError('')
+    
+    try {
+      // Send OTP to phone number
+      const response = await authAPI.sendOtp({ phone: formData.phone })
+      
+      if (response.success) {
+        // Navigate to OTP verification
+        navigate('/verify-otp', { 
+          state: { 
+            phone: formData.phone,
+            password: formData.password,
+            isLogin: true
+          }
+        })
+      } else {
+        setError(response.message || 'Kod yuborishda xatolik')
+      }
+    } catch (err) {
+      console.error('Send OTP error:', err)
+      setError('Server bilan bog\'lanishda xatolik')
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   return (
@@ -37,6 +63,18 @@ export default function LoginPage() {
 
       {/* Form Card */}
       <div className={styles.formCard}>
+        {error && (
+          <div style={{ 
+            background: '#fee', 
+            color: '#c00', 
+            padding: '12px', 
+            borderRadius: '8px', 
+            marginBottom: '16px',
+            fontSize: '14px'
+          }}>
+            {error}
+          </div>
+        )}
         <form className={styles.form} onSubmit={handleSubmit}>
           <div className={styles.inputGroup}>
             <input
@@ -47,6 +85,7 @@ export default function LoginPage() {
               placeholder="Telefon raqam"
               className={styles.input}
               required
+              disabled={isLoading}
             />
           </div>
 
@@ -60,6 +99,7 @@ export default function LoginPage() {
                 placeholder="Parol"
                 className={styles.input}
                 required
+                disabled={isLoading}
               />
               <button
                 type="button"
@@ -71,8 +111,8 @@ export default function LoginPage() {
             </div>
           </div>
 
-          <button type="submit" className={styles.submitButton}>
-            Kirish
+          <button type="submit" className={styles.submitButton} disabled={isLoading}>
+            {isLoading ? <Loader2 size={20} className="spin" /> : 'Davom etish'}
           </button>
         </form>
 

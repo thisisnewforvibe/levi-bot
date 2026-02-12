@@ -23,6 +23,11 @@ const config: CapacitorConfig = {
     allowMixedContent: true,
     // Enable exact alarms for precise reminder timing
     useLegacyBridge: false
+  },
+  ios: {
+    // Use https scheme for security (matches Android)
+    scheme: 'Levi',
+    contentInset: 'automatic'
   }
 };
 

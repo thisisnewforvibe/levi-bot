@@ -11,8 +11,10 @@ import asyncio
 import logging
 import tempfile
 import json
+import random
+import httpx
 from datetime import datetime, timedelta
-from typing import Optional, List
+from typing import Optional, List, Dict
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Depends, Header, UploadFile, File, BackgroundTasks, Body
 from fastapi.middleware.cors import CORSMiddleware
@@ -28,6 +30,15 @@ JWT_ALGORITHM = 'HS256'
 JWT_EXPIRATION_HOURS = 24 * 30  # 30 days
 FOLLOW_UP_DELAY_SECONDS = 1800  # 30 minutes
 DEFAULT_TIMEZONE = 'Asia/Tashkent'
+
+# OTP Storage (in-memory fallback, expires after 5 minutes)
+# Format: {phone: {"code": "123456", "expires": datetime, "attempts": 0}}
+otp_storage: Dict[str, dict] = {}
+
+# Unimtx OTP Service Configuration
+UNIMTX_ACCESS_KEY_ID = os.environ.get('UNIMTX_ACCESS_KEY_ID', '')
+UNIMTX_API_BASE = 'https://api.unimtx.com'
+UNIMTX_ENABLED = bool(UNIMTX_ACCESS_KEY_ID)
 
 # API Keys
 GEMINI_API_KEY = os.environ.get('GEMINI_API_KEY')
@@ -424,6 +435,23 @@ class AuthResponse(BaseModel):
     message: Optional[str] = None
 
 
+class OtpRequest(BaseModel):
+    phone: str
+
+
+class OtpVerifyRequest(BaseModel):
+    phone: str
+    otp: str
+    name: Optional[str] = None
+    password: Optional[str] = None
+    isLogin: Optional[bool] = False
+
+
+class OtpResponse(BaseModel):
+    success: bool
+    message: Optional[str] = None
+
+
 class ReminderCreate(BaseModel):
     task_text: str
     scheduled_time: str
@@ -736,7 +764,21 @@ Agar eslatma bo'lmasa: []
             try:
                 scheduled_time = datetime.strptime(time_str, '%Y-%m-%d %H:%M')
                 diff_seconds = (scheduled_time - now_utc).total_seconds()
-                logger.info(f"Scheduled time diff from now_utc: {diff_seconds:.0f} seconds ({diff_seconds/60:.1f} minutes)")
+                logger.info(f"Raw scheduled time diff from now_utc: {diff_seconds:.0f} seconds ({diff_seconds/60:.1f} minutes)")
+                
+                # FIX: Gemini returns HH:MM without seconds, causing alarms to fire early.
+                # If the scheduled time is within 10 minutes of now, add the current seconds
+                # to prevent rounding down. This ensures "5 minutdan keyin" at 12:30:42
+                # becomes 12:35:42 instead of 12:35:00
+                if 0 < diff_seconds < 600:  # Within 10 minutes
+                    current_seconds = now_utc.second
+                    scheduled_time = scheduled_time.replace(second=current_seconds)
+                    # If adding seconds makes it slightly in the past, add 1 minute
+                    if scheduled_time <= now_utc:
+                        scheduled_time = scheduled_time + timedelta(minutes=1)
+                    diff_seconds = (scheduled_time - now_utc).total_seconds()
+                    logger.info(f"Adjusted for seconds: new time = {scheduled_time.strftime('%Y-%m-%d %H:%M:%S')}, diff = {diff_seconds:.0f}s")
+                    r['time_utc'] = scheduled_time.strftime('%Y-%m-%d %H:%M:%S')
                 
                 # If time is in the past for non-recurring, skip
                 if scheduled_time <= now_utc and not r.get('recurrence_type'):
@@ -750,7 +792,7 @@ Agar eslatma bo'lmasa: []
                         scheduled_time = scheduled_time + timedelta(days=1)
                     elif recurrence == 'weekly':
                         scheduled_time = scheduled_time + timedelta(weeks=1)
-                    r['time_utc'] = scheduled_time.strftime('%Y-%m-%d %H:%M')
+                    r['time_utc'] = scheduled_time.strftime('%Y-%m-%d %H:%M:%S')
                     logger.info(f"Rescheduled recurring reminder to: {r['time_utc']}")
                 
                 processed.append(r)
@@ -864,6 +906,225 @@ async def login(data: LoginRequest):
         user = UserResponse(id=row[0], phone=row[1], name=row[3], timezone=row[4], language=row[5], created_at=str(row[6]))
         token = create_jwt_token(row[0])
         return AuthResponse(success=True, user=user, token=token)
+
+
+@app.post("/api/auth/send-otp", response_model=OtpResponse)
+async def send_otp(data: OtpRequest):
+    """Send OTP code to phone number via Unimtx."""
+    phone = data.phone.strip()
+    
+    # Ensure phone is in E.164 format
+    if not phone.startswith('+'):
+        phone = '+' + phone
+    
+    if UNIMTX_ENABLED:
+        # Use Unimtx OTP API
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    f"{UNIMTX_API_BASE}/?action=otp.send&accessKeyId={UNIMTX_ACCESS_KEY_ID}",
+                    json={
+                        "to": phone,
+                        "digits": 6,
+                        "ttl": 300,
+                    },
+                    headers={"Content-Type": "application/json"}
+                )
+                result = response.json()
+                logger.info(f"Unimtx send OTP response for {phone}: code={result.get('code')}, message={result.get('message')}")
+                
+                if result.get("code") == "0":
+                    return OtpResponse(success=True, message="Tasdiqlash kodi yuborildi")
+                else:
+                    error_msg = result.get("message", "Unknown error")
+                    logger.error(f"Unimtx OTP failed: {error_msg}")
+                    return OtpResponse(success=False, message=f"SMS yuborishda xatolik: {error_msg}")
+        except Exception as e:
+            logger.error(f"Unimtx OTP exception: {e}")
+            return OtpResponse(success=False, message="SMS xizmatida xatolik yuz berdi")
+    else:
+        # Fallback: local OTP generation (for development)
+        now = datetime.utcnow()
+        
+        # Clean expired OTPs
+        expired_phones = [p for p, v in otp_storage.items() if v["expires"] < now]
+        for p in expired_phones:
+            del otp_storage[p]
+        
+        # Rate limiting
+        if phone in otp_storage:
+            time_since_sent = now - (otp_storage[phone]["expires"] - timedelta(minutes=5))
+            if time_since_sent.total_seconds() < 60:
+                return OtpResponse(success=False, message="Iltimos, 60 soniya kuting")
+        
+        otp_code = str(random.randint(100000, 999999))
+        otp_storage[phone] = {
+            "code": otp_code,
+            "expires": now + timedelta(minutes=5),
+            "attempts": 0
+        }
+        logger.info(f"[DEV] OTP for {phone}: {otp_code}")
+        return OtpResponse(success=True, message="Tasdiqlash kodi yuborildi")
+
+
+@app.post("/api/auth/verify-otp", response_model=AuthResponse)
+async def verify_otp(data: OtpVerifyRequest):
+    """Verify OTP code and complete login/registration."""
+    phone = data.phone.strip()
+    otp_code = data.otp.strip()
+    
+    # Ensure phone is in E.164 format
+    if not phone.startswith('+'):
+        phone = '+' + phone
+    
+    # Verify OTP via Unimtx or locally
+    otp_valid = False
+    
+    if UNIMTX_ENABLED:
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    f"{UNIMTX_API_BASE}/?action=otp.verify&accessKeyId={UNIMTX_ACCESS_KEY_ID}",
+                    json={
+                        "to": phone,
+                        "code": otp_code,
+                    },
+                    headers={"Content-Type": "application/json"}
+                )
+                result = response.json()
+                logger.info(f"Unimtx verify OTP response for {phone}: {result}")
+                
+                if result.get("code") == "0" and result.get("data", {}).get("valid") is True:
+                    otp_valid = True
+                else:
+                    return AuthResponse(success=False, message="Kod noto'g'ri yoki muddati tugagan")
+        except Exception as e:
+            logger.error(f"Unimtx verify exception: {e}")
+            return AuthResponse(success=False, message="Tekshirishda xatolik yuz berdi")
+    else:
+        # Local verification fallback (for development)
+        now = datetime.utcnow()
+        
+        if phone not in otp_storage:
+            return AuthResponse(success=False, message="Kod topilmadi. Qayta urinib ko'ring")
+        
+        stored = otp_storage[phone]
+        
+        if stored["expires"] < now:
+            del otp_storage[phone]
+            return AuthResponse(success=False, message="Kod muddati tugagan. Qayta yuborish tugmasini bosing")
+        
+        if stored["attempts"] >= 5:
+            del otp_storage[phone]
+            return AuthResponse(success=False, message="Ko'p marta noto'g'ri kiritildi. Qayta yuborish tugmasini bosing")
+        
+        if stored["code"] != otp_code:
+            otp_storage[phone]["attempts"] += 1
+            remaining = 5 - otp_storage[phone]["attempts"]
+            return AuthResponse(success=False, message=f"Kod noto'g'ri. {remaining} ta urinish qoldi")
+        
+        # Valid - clean up
+        del otp_storage[phone]
+        otp_valid = True
+    
+    if not otp_valid:
+        return AuthResponse(success=False, message="Kod noto'g'ri")
+    
+    # Handle login or registration
+    if data.isLogin:
+        # Login flow - verify password and return user
+        if USE_TURSO and LIBSQL_AVAILABLE:
+            conn = get_db_connection()
+            if conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT id, phone, password_hash, name, timezone, language, created_at FROM app_users WHERE phone = ?",
+                    (phone,)
+                )
+                row = cursor.fetchone()
+                conn.close()
+                
+                if not row:
+                    return AuthResponse(success=False, message="Foydalanuvchi topilmadi")
+                
+                if data.password and not verify_password(data.password, row[2]):
+                    return AuthResponse(success=False, message="Parol noto'g'ri")
+                
+                user = UserResponse(id=row[0], phone=row[1], name=row[3], timezone=row[4], language=row[5], created_at=str(row[6]))
+                token = create_jwt_token(row[0])
+                return AuthResponse(success=True, user=user, token=token)
+        
+        async with aiosqlite.connect(DATABASE_PATH) as db:
+            cursor = await db.execute(
+                "SELECT id, phone, password_hash, name, timezone, language, created_at FROM app_users WHERE phone = ?",
+                (phone,)
+            )
+            row = await cursor.fetchone()
+            
+            if not row:
+                return AuthResponse(success=False, message="Foydalanuvchi topilmadi")
+            
+            if data.password and not verify_password(data.password, row[2]):
+                return AuthResponse(success=False, message="Parol noto'g'ri")
+            
+            user = UserResponse(id=row[0], phone=row[1], name=row[3], timezone=row[4], language=row[5], created_at=str(row[6]))
+            token = create_jwt_token(row[0])
+            return AuthResponse(success=True, user=user, token=token)
+    else:
+        # Registration flow - create new user
+        if not data.name or not data.password:
+            return AuthResponse(success=False, message="Ism va parol kiritilishi shart")
+        
+        if USE_TURSO and LIBSQL_AVAILABLE:
+            conn = get_db_connection()
+            if conn:
+                cursor = conn.cursor()
+                cursor.execute("SELECT id FROM app_users WHERE phone = ?", (phone,))
+                if cursor.fetchone():
+                    conn.close()
+                    return AuthResponse(success=False, message="Telefon raqam allaqachon ro'yxatdan o'tgan")
+                
+                password_hash = hash_password(data.password)
+                cursor.execute(
+                    "INSERT INTO app_users (phone, password_hash, name) VALUES (?, ?, ?)",
+                    (phone, password_hash, data.name)
+                )
+                conn.commit()
+                user_id = cursor.lastrowid
+                
+                cursor.execute(
+                    "SELECT id, phone, name, timezone, language, created_at FROM app_users WHERE id = ?",
+                    (user_id,)
+                )
+                row = cursor.fetchone()
+                conn.close()
+                
+                user = UserResponse(id=row[0], phone=row[1], name=row[2], timezone=row[3], language=row[4], created_at=str(row[5]))
+                token = create_jwt_token(user_id)
+                return AuthResponse(success=True, user=user, token=token)
+        
+        async with aiosqlite.connect(DATABASE_PATH) as db:
+            cursor = await db.execute("SELECT id FROM app_users WHERE phone = ?", (phone,))
+            if await cursor.fetchone():
+                return AuthResponse(success=False, message="Telefon raqam allaqachon ro'yxatdan o'tgan")
+            
+            password_hash = hash_password(data.password)
+            cursor = await db.execute(
+                "INSERT INTO app_users (phone, password_hash, name) VALUES (?, ?, ?)",
+                (phone, password_hash, data.name)
+            )
+            await db.commit()
+            user_id = cursor.lastrowid
+            
+            cursor = await db.execute(
+                "SELECT id, phone, name, timezone, language, created_at FROM app_users WHERE id = ?",
+                (user_id,)
+            )
+            row = await cursor.fetchone()
+            
+            user = UserResponse(id=row[0], phone=row[1], name=row[2], timezone=row[3], language=row[4], created_at=str(row[5]))
+            token = create_jwt_token(user_id)
+            return AuthResponse(success=True, user=user, token=token)
 
 
 @app.get("/api/auth/me")

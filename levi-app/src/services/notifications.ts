@@ -6,6 +6,7 @@
 
 import { LocalNotifications, ScheduleOptions, PendingLocalNotificationSchema } from '@capacitor/local-notifications';
 import { Capacitor } from '@capacitor/core';
+import LeviAlarm, { LeviAlarmManager } from './leviAlarm';
 
 // Follow-up delay in milliseconds (30 minutes, same as Telegram bot)
 export const FOLLOW_UP_DELAY_MS = 30 * 60 * 1000;
@@ -53,10 +54,12 @@ class NotificationService {
     try {
       // Check current permission status
       const permStatus = await LocalNotifications.checkPermissions();
+      console.log('Notification permission status:', permStatus.display);
       
       if (permStatus.display === 'prompt') {
         // Request permission
         const result = await LocalNotifications.requestPermissions();
+        console.log('Permission request result:', result.display);
         if (result.display !== 'granted') {
           console.warn('Notification permission denied');
           return false;
@@ -68,6 +71,13 @@ class NotificationService {
 
       // Set up notification listeners
       await this.setupListeners();
+      
+      // Log pending notifications for debugging
+      const pending = await LocalNotifications.getPending();
+      console.log(`Currently ${pending.notifications.length} pending notifications`);
+      pending.notifications.forEach(n => {
+        console.log(`  - ID: ${n.id}, Title: ${n.title}, Schedule: ${JSON.stringify(n.schedule)}`);
+      });
       
       this.initialized = true;
       console.log('Notification service initialized successfully');
@@ -83,13 +93,25 @@ class NotificationService {
    */
   private async setupListeners(): Promise<void> {
     // When notification is received while app is in foreground
-    await LocalNotifications.addListener('localNotificationReceived', (notification) => {
-      console.log('Notification received:', notification);
+    // NOTE: We're using native AlarmManager now, so we don't need to play alarm here
+    // The AlarmReceiver.java handles playing the alarm sound directly
+    await LocalNotifications.addListener('localNotificationReceived', async (notification) => {
+      console.log('Capacitor notification received (for logging only):', notification);
+      // Don't play alarm here - native AlarmManager handles it
     });
 
     // When user taps on notification or action button
     await LocalNotifications.addListener('localNotificationActionPerformed', async (action) => {
       console.log('Notification action performed:', action);
+      
+      // Stop the alarm when user interacts with notification
+      try {
+        if (Capacitor.getPlatform() === 'android') {
+          await LeviAlarm.stopAlarm();
+        }
+      } catch (error) {
+        console.error('Failed to stop alarm:', error);
+      }
       
       const actionId = action.actionId;
       const notificationId = action.notification.id;
@@ -277,48 +299,103 @@ class NotificationService {
   }
 
   /**
-   * Schedule multiple alarms at once (Done/Snooze buttons only)
+   * Schedule multiple alarms at once using NATIVE Android AlarmManager
+   * This ensures alarms play sound and vibrate even when app is closed
    * Follow-ups are only scheduled when user clicks "Done"
    */
   async scheduleMultipleAlarms(alarms: AlarmNotification[]): Promise<boolean> {
     if (!this.initialized) {
-      await this.initialize();
+      const initSuccess = await this.initialize();
+      if (!initSuccess) {
+        console.error('Failed to initialize notification service');
+        return false;
+      }
     }
 
     try {
-      // Schedule initial alarms only (no auto follow-ups)
-      const notifications = alarms.map((alarm) => ({
-        id: alarm.id,
-        title: alarm.title,
-        body: alarm.body,
-        schedule: {
-          at: alarm.scheduledTime,
-          allowWhileIdle: true,
-        },
-        sound: 'alarm.wav',
-        smallIcon: 'ic_stat_icon_config_sample',
-        largeIcon: 'ic_launcher',
-        channelId: 'alarm_channel',
-        extra: { 
-          ...alarm.extra,
-          taskText: alarm.body,
-          isFollowUp: false,
-        },
-        actionTypeId: 'reminder_actions',
-        ongoing: false,
-        autoCancel: false,
-      }));
-
-      await LocalNotifications.schedule({ notifications });
-      console.log(`${alarms.length} alarms scheduled (follow-ups will be scheduled when user clicks Done)`);
+      // Log what we're scheduling
+      console.log(`Scheduling ${alarms.length} alarms:`);
+      alarms.forEach(alarm => {
+        const timestamp = alarm.scheduledTime.getTime();
+        const now = Date.now();
+        console.log(`  - ID: ${alarm.id}, "${alarm.body}"`);
+        console.log(`    Time: ${alarm.scheduledTime.toLocaleString()}`);
+        console.log(`    Timestamp: ${timestamp}, Now: ${now}, Diff: ${timestamp - now}ms`);
+      });
       
-      // NOTE: Follow-ups are NOT auto-scheduled here
-      // They are only scheduled when user clicks "Done" on the alarm
+      // On Android, use native AlarmManager for reliable alarm with sound
+      // On iOS, use Capacitor LocalNotifications (which uses UNUserNotificationCenter)
+      if (Capacitor.getPlatform() === 'android') {
+        const nativeAlarms = alarms.map(alarm => ({
+          id: alarm.id,
+          title: '🔔 Eslatma',
+          body: alarm.body,
+          triggerTime: alarm.scheduledTime.getTime(),
+        }));
+        
+        console.log('Sending to native AlarmManager:', JSON.stringify(nativeAlarms));
+        
+        const result = await LeviAlarmManager.scheduleMultiple({ alarms: nativeAlarms });
+        console.log(`Native AlarmManager scheduled ${result.scheduled} alarms`);
+        console.log(`✓ ${alarms.length} alarms scheduled with native AlarmManager (sound guaranteed)`);
+      } else {
+        // iOS path - use Capacitor LocalNotifications
+        const notifications = alarms.map((alarm) => ({
+          id: alarm.id,
+          title: '🔔 Eslatma',
+          body: alarm.body,
+          schedule: {
+            at: alarm.scheduledTime,
+            allowWhileIdle: true,
+          },
+          sound: 'alarm.wav',
+          extra: { 
+            ...alarm.extra,
+            taskText: alarm.body,
+            isFollowUp: false,
+          },
+          actionTypeId: 'reminder_actions',
+        }));
+
+        await LocalNotifications.schedule({ notifications });
+        console.log(`✓ ${alarms.length} alarms scheduled via Capacitor LocalNotifications (iOS)`);
+      }
       
       return true;
     } catch (error) {
-      console.error('Failed to schedule multiple alarms:', error);
-      return false;
+      console.error('Failed to schedule alarms:', error);
+      
+      // Fallback to Capacitor-only if native fails
+      try {
+        console.log('Falling back to Capacitor-only notifications...');
+        const notifications = alarms.map((alarm) => ({
+          id: alarm.id,
+          title: '🔔 Eslatma',
+          body: alarm.body,
+          schedule: {
+            at: alarm.scheduledTime,
+            allowWhileIdle: true,
+          },
+          smallIcon: 'ic_stat_icon_config_sample',
+          largeIcon: 'ic_launcher',
+          channelId: 'alarm_channel',
+          extra: { 
+            ...alarm.extra,
+            taskText: alarm.body,
+            isFollowUp: false,
+          },
+          actionTypeId: 'reminder_actions',
+          ongoing: true,
+          autoCancel: false,
+        }));
+
+        await LocalNotifications.schedule({ notifications });
+        console.log('Fallback successful - alarms scheduled via Capacitor');
+        return true;
+      } catch (fallbackError) {
+        console.error('Fallback also failed:', fallbackError);
+        return false;
+      }
     }
   }
 
@@ -411,33 +488,47 @@ class NotificationService {
     }
 
     try {
-      // Main alarm channel
+      // Delete existing channels first to ensure fresh settings
+      try {
+        await LocalNotifications.deleteChannel({ id: 'alarm_channel' });
+        await LocalNotifications.deleteChannel({ id: 'followup_channel' });
+        console.log('Deleted old notification channels');
+      } catch (e) {
+        // Channels might not exist yet, that's fine
+      }
+      
+      // Main alarm channel - MAX importance for heads-up + sound
+      // Note: For Android 8+, sound must be a file in res/raw folder
+      // If no sound file exists, system default will be used
       await LocalNotifications.createChannel({
         id: 'alarm_channel',
-        name: 'Eslatmalar',
-        description: 'Muhim eslatmalar uchun signal',
-        importance: 5, // Max importance - makes sound and shows heads-up
+        name: 'Eslatmalar (Alarm)',
+        description: 'Muhim eslatmalar - signal va tebranish bilan',
+        importance: 5, // MAX - makes sound, vibrates, heads-up display
         visibility: 1, // Public - show on lock screen
-        sound: 'alarm.wav',
+        // Not specifying sound means it uses system default
         vibration: true,
         lights: true,
         lightColor: '#FF0000',
       });
-      console.log('Alarm channel created');
+      console.log('Alarm channel created with MAX importance (5)');
       
-      // Follow-up channel
+      // Follow-up channel  
       await LocalNotifications.createChannel({
         id: 'followup_channel',
         name: 'Tekshiruv',
         description: 'Vazifa bajarilganmi tekshirish',
-        importance: 5, // Max importance
+        importance: 5, // MAX importance
         visibility: 1, // Public
-        sound: 'alarm.wav',
         vibration: true,
         lights: true,
-        lightColor: '#FFA500', // Orange for follow-ups
+        lightColor: '#FFA500',
       });
       console.log('Follow-up channel created');
+      
+      // List channels to verify
+      const channels = await LocalNotifications.listChannels();
+      console.log('Created channels:', channels.channels.map(c => `${c.id}: importance=${c.importance}`));
     } catch (error) {
       console.error('Failed to create alarm channel:', error);
     }
@@ -500,11 +591,42 @@ export function reminderToAlarm(reminder: {
   task_text: string;
   scheduled_time_utc: string;
 }): AlarmNotification {
+  // Ensure UTC time is parsed correctly
+  // Backend returns format like "2026-01-25 12:35" or "2026-01-25 12:35:42"
+  // JavaScript requires ISO format with T separator: "2026-01-25T12:35:00Z"
+  let utcTimeStr = reminder.scheduled_time_utc;
+  
+  // Replace space with T for proper ISO format
+  if (utcTimeStr.includes(' ') && !utcTimeStr.includes('T')) {
+    utcTimeStr = utcTimeStr.replace(' ', 'T');
+  }
+  
+  // Add Z suffix if not present (to indicate UTC)
+  if (!utcTimeStr.endsWith('Z') && !utcTimeStr.includes('+')) {
+    utcTimeStr = utcTimeStr + 'Z';
+  }
+  
+  const scheduledTime = new Date(utcTimeStr);
+  
+  // Validate the parsed time
+  if (isNaN(scheduledTime.getTime())) {
+    console.error(`Failed to parse scheduled_time_utc: "${reminder.scheduled_time_utc}" -> "${utcTimeStr}"`);
+    // Fallback: try parsing as-is
+    const fallbackTime = new Date(reminder.scheduled_time_utc);
+    console.log(`Fallback parse result: ${fallbackTime.toISOString()}`);
+  }
+  
+  console.log(`Creating alarm for: ${reminder.task_text}`);
+  console.log(`  Original: "${reminder.scheduled_time_utc}" -> Parsed: "${utcTimeStr}"`);
+  console.log(`  Timestamp: ${scheduledTime.getTime()}`);
+  console.log(`  ISO: ${scheduledTime.toISOString()}`);
+  console.log(`  Local: ${scheduledTime.toLocaleString()}`);
+  
   return {
     id: reminder.id,
     title: '🔔 Eslatma',
     body: reminder.task_text,
-    scheduledTime: new Date(reminder.scheduled_time_utc),
+    scheduledTime: scheduledTime,
     extra: { reminderId: reminder.id },
   };
 }

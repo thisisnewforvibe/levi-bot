@@ -1,17 +1,48 @@
-import { useEffect } from 'react'
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import HomePage from './pages/HomePage'
 import ProfilePage from './pages/ProfilePage'
 import RegisterPage from './pages/RegisterPage'
 import LoginPage from './pages/LoginPage'
+import OtpVerifyPage from './pages/OtpVerifyPage'
+import EditProfilePage from './pages/EditProfilePage'
+import PersonalInfoPage from './pages/PersonalInfoPage'
+import ChangePhonePage from './pages/ChangePhonePage'
+import AlarmSettingsPage from './pages/AlarmSettingsPage'
+import HelpCenterPage from './pages/HelpCenterPage'
+import SubscriptionPage from './pages/SubscriptionPage'
 import { notificationService } from './services/notifications'
-import { remindersAPI } from './services/api'
+import { remindersAPI, authAPI, DEV_MOCK_AUTH } from './services/api'
+
+// Protected Route component
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  const isAuthenticated = authAPI.isAuthenticated()
+  
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />
+  }
+  
+  return <>{children}</>
+}
 
 function App() {
+  const [isReady, setIsReady] = useState(false)
+
   // Initialize notification service on app start
   useEffect(() => {
-    const initNotifications = async () => {
+    const initApp = async () => {
       try {
+        // If in dev mock mode, inject mock user data
+        if (DEV_MOCK_AUTH) {
+          localStorage.setItem('auth_token', 'mock_token_for_testing');
+          localStorage.setItem('user', JSON.stringify({
+            id: 1,
+            phone: '+998901234567',
+            name: 'Test User',
+            timezone: 'Asia/Tashkent',
+          }));
+        }
+
         // Create alarm channel (Android)
         await notificationService.createAlarmChannel()
         
@@ -46,18 +77,76 @@ function App() {
       } catch (error) {
         console.error('Failed to initialize notifications:', error)
       }
+      
+      setIsReady(true)
     }
 
-    initNotifications()
+    initApp()
   }, [])
+
+  if (!isReady) {
+    return (
+      <div style={{ 
+        display: 'flex', 
+        justifyContent: 'center', 
+        alignItems: 'center', 
+        height: '100vh',
+        background: '#fff'
+      }}>
+        <div style={{ textAlign: 'center' }}>
+          <h1 style={{ fontSize: '2rem', marginBottom: '1rem' }}>Levi</h1>
+          <p>Yuklanmoqda...</p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<HomePage />} />
-        <Route path="/profile" element={<ProfilePage />} />
-        <Route path="/register" element={<RegisterPage />} />
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/register" element={<RegisterPage />} />
+        <Route path="/verify-otp" element={<OtpVerifyPage />} />
+        <Route path="/" element={
+          <ProtectedRoute>
+            <HomePage />
+          </ProtectedRoute>
+        } />
+        <Route path="/profile" element={
+          <ProtectedRoute>
+            <ProfilePage />
+          </ProtectedRoute>
+        } />
+        <Route path="/edit-profile" element={
+          <ProtectedRoute>
+            <EditProfilePage />
+          </ProtectedRoute>
+        } />
+        <Route path="/personal-info" element={
+          <ProtectedRoute>
+            <PersonalInfoPage />
+          </ProtectedRoute>
+        } />
+        <Route path="/change-phone" element={
+          <ProtectedRoute>
+            <ChangePhonePage />
+          </ProtectedRoute>
+        } />
+        <Route path="/alarm-settings" element={
+          <ProtectedRoute>
+            <AlarmSettingsPage />
+          </ProtectedRoute>
+        } />
+        <Route path="/help-center" element={
+          <ProtectedRoute>
+            <HelpCenterPage />
+          </ProtectedRoute>
+        } />
+        <Route path="/subscription" element={
+          <ProtectedRoute>
+            <SubscriptionPage />
+          </ProtectedRoute>
+        } />
       </Routes>
     </BrowserRouter>
   )

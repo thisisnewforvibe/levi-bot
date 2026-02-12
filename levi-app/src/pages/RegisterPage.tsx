@@ -1,11 +1,15 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Eye, EyeOff } from 'lucide-react'
+import { Eye, EyeOff, Loader2, Check } from 'lucide-react'
 import styles from './RegisterPage.module.css'
+import { authAPI } from '../services/api'
 
 export default function RegisterPage() {
   const navigate = useNavigate()
   const [showPassword, setShowPassword] = useState(false)
+  const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [acceptedTerms, setAcceptedTerms] = useState(false)
   const [formData, setFormData] = useState({
     name: '',
     phone: '',
@@ -17,13 +21,43 @@ export default function RegisterPage() {
       ...prev,
       [e.target.name]: e.target.value
     }))
+    setError('')
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    // TODO: Implement registration logic
-    console.log('Register:', formData)
-    navigate('/')
+    
+    if (!acceptedTerms) {
+      setError('Oferta shartlarini qabul qilishingiz kerak')
+      return
+    }
+    
+    setIsLoading(true)
+    setError('')
+    
+    try {
+      // Send OTP to phone number
+      const response = await authAPI.sendOtp({ phone: formData.phone })
+      
+      if (response.success) {
+        // Navigate to OTP verification with form data
+        navigate('/verify-otp', { 
+          state: { 
+            phone: formData.phone,
+            name: formData.name,
+            password: formData.password,
+            isLogin: false
+          }
+        })
+      } else {
+        setError(response.message || "Kod yuborishda xatolik")
+      }
+    } catch (err) {
+      console.error('Send OTP error:', err)
+      setError('Server bilan bog\'lanishda xatolik')
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   return (
@@ -38,6 +72,18 @@ export default function RegisterPage() {
 
       {/* Form Card */}
       <div className={styles.formCard}>
+        {error && (
+          <div style={{ 
+            background: '#fee', 
+            color: '#c00', 
+            padding: '12px', 
+            borderRadius: '8px', 
+            marginBottom: '16px',
+            fontSize: '14px'
+          }}>
+            {error}
+          </div>
+        )}
         <form className={styles.form} onSubmit={handleSubmit}>
           <div className={styles.inputGroup}>
             <input
@@ -48,6 +94,7 @@ export default function RegisterPage() {
               placeholder="Ismingiz"
               className={styles.input}
               required
+              disabled={isLoading}
             />
           </div>
 
@@ -60,6 +107,7 @@ export default function RegisterPage() {
               placeholder="Telefon raqam"
               className={styles.input}
               required
+              disabled={isLoading}
             />
           </div>
 
@@ -73,6 +121,7 @@ export default function RegisterPage() {
                 placeholder="Parol"
                 className={styles.input}
                 required
+                disabled={isLoading}
               />
               <button
                 type="button"
@@ -84,8 +133,27 @@ export default function RegisterPage() {
             </div>
           </div>
 
-          <button type="submit" className={styles.submitButton}>
-            Boshlash
+          {/* Oferta Checkbox */}
+          <div className={styles.checkboxGroup}>
+            <label className={styles.checkboxLabel}>
+              <div 
+                className={`${styles.checkbox} ${acceptedTerms ? styles.checked : ''}`}
+                onClick={() => setAcceptedTerms(!acceptedTerms)}
+              >
+                {acceptedTerms && <Check size={14} strokeWidth={3} />}
+              </div>
+              <span className={styles.checkboxText}>
+                <a href="#" className={styles.ofertaLink} onClick={(e) => {
+                  e.preventDefault()
+                  // TODO: Open oferta page
+                  alert('Oferta sahifasi')
+                }}>Oferta shartlari</a>ni qabul qilaman
+              </span>
+            </label>
+          </div>
+
+          <button type="submit" className={styles.submitButton} disabled={isLoading}>
+            {isLoading ? <Loader2 size={20} className="spin" /> : 'Davom etish'}
           </button>
         </form>
 

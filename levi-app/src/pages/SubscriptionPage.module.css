@@ -1,0 +1,276 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  min-height: 100dvh;
+  background-color: var(--background);
+  padding-top: env(safe-area-inset-top);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 20px;
+}
+
+.backButton {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--search-bg);
+  border: none;
+  border-radius: 50%;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.backButton:hover {
+  background: #E8E8E8;
+}
+
+.title {
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.content {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* Active Subscription */
+.activeCard {
+  width: 100%;
+  padding: 20px;
+  background: linear-gradient(135deg, #1A1A1A 0%, #333 100%);
+  border-radius: 20px;
+  text-align: center;
+  margin-bottom: 24px;
+}
+
+.activeBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: linear-gradient(135deg, #FFD700 0%, #FFA500 100%);
+  border-radius: 16px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #1A1A1A;
+  margin-bottom: 12px;
+}
+
+.activeTitle {
+  font-size: 20px;
+  font-weight: 700;
+  color: white;
+  margin-bottom: 4px;
+}
+
+.activeDate {
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* Offer Section */
+.iconWrapper {
+  width: 100px;
+  height: 100px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #FFD700 0%, #FFA500 100%);
+  border-radius: 50%;
+  margin-bottom: 24px;
+}
+
+.crownIcon {
+  color: white;
+}
+
+.offerTitle {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.offerDescription {
+  font-size: 16px;
+  color: var(--text-secondary);
+  margin-bottom: 24px;
+}
+
+.priceCard {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px 40px;
+  background: linear-gradient(135deg, #1A1A1A 0%, #333 100%);
+  border-radius: 20px;
+  margin-bottom: 32px;
+}
+
+.price {
+  font-size: 40px;
+  font-weight: 700;
+  color: white;
+}
+
+.currency {
+  font-size: 16px;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* Features */
+.features {
+  width: 100%;
+  list-style: none;
+  padding: 0;
+  margin: 0 0 24px;
+}
+
+.featureItem {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 0;
+  font-size: 16px;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--divider);
+}
+
+.featureItem:last-child {
+  border-bottom: none;
+}
+
+.checkIcon {
+  color: #22c55e;
+  flex-shrink: 0;
+}
+
+.freeInfo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 20px;
+  background: #fff3cd;
+  border-radius: 12px;
+  font-size: 14px;
+  color: #856404;
+  margin-bottom: 24px;
+  width: 100%;
+}
+
+.subscribeButton {
+  width: 100%;
+  padding: 18px;
+  background: linear-gradient(135deg, #FFD700 0%, #FFA500 100%);
+  border: none;
+  border-radius: 16px;
+  font-size: 17px;
+  font-weight: 600;
+  font-family: inherit;
+  color: #1A1A1A;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.subscribeButton:hover {
+  transform: scale(1.02);
+}
+
+.cancelButton {
+  width: 100%;
+  padding: 16px;
+  background: none;
+  border: 2px solid #dc3545;
+  border-radius: 16px;
+  font-size: 16px;
+  font-weight: 500;
+  font-family: inherit;
+  color: #dc3545;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  margin-top: 20px;
+}
+
+.cancelButton:hover {
+  background: #dc3545;
+  color: white;
+}
+
+/* Confirmation Modal */
+.overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 20px;
+}
+
+.confirmModal {
+  background: white;
+  border-radius: 20px;
+  padding: 24px;
+  max-width: 340px;
+  width: 100%;
+}
+
+.confirmTitle {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 12px;
+}
+
+.confirmText {
+  font-size: 15px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin-bottom: 24px;
+}
+
+.confirmButtons {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.confirmCancel {
+  padding: 14px;
+  background: var(--text-primary);
+  border: none;
+  border-radius: 12px;
+  font-size: 15px;
+  font-weight: 600;
+  font-family: inherit;
+  color: white;
+  cursor: pointer;
+}
+
+.confirmDelete {
+  padding: 14px;
+  background: none;
+  border: none;
+  font-size: 15px;
+  font-weight: 500;
+  font-family: inherit;
+  color: #dc3545;
+  cursor: pointer;
+}

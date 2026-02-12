@@ -129,3 +129,46 @@
   cursor: pointer;
   text-decoration: underline;
 }
+
+/* Checkbox */
+.checkboxGroup {
+  margin-top: 8px;
+}
+
+.checkboxLabel {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  cursor: pointer;
+}
+
+.checkbox {
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--search-bg);
+  border: 2px solid var(--text-tertiary);
+  border-radius: 6px;
+  color: white;
+  transition: all 0.2s ease;
+}
+
+.checkbox.checked {
+  background: var(--text-primary);
+  border-color: var(--text-primary);
+}
+
+.checkboxText {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.ofertaLink {
+  color: var(--text-primary);
+  font-weight: 600;
+  text-decoration: underline;
+}
