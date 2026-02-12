@@ -910,12 +910,24 @@ async def login(data: LoginRequest):
 
 @app.post("/api/auth/send-otp", response_model=OtpResponse)
 async def send_otp(data: OtpRequest):
-    """Send OTP code to phone number via Unimtx."""
+    """Send OTP code to phone number via Unimtx SMS."""
     phone = data.phone.strip()
+    
+    # Remove any spaces, dashes, parentheses
+    phone = phone.replace(' ', '').replace('-', '').replace('(', '').replace(')', '')
     
     # Ensure phone is in E.164 format
     if not phone.startswith('+'):
-        phone = '+' + phone
+        # If user typed 998XXXXXXXXX (without +)
+        if phone.startswith('998'):
+            phone = '+' + phone
+        # If user typed 9XXXXXXXX (9 digits, Uzbek mobile)
+        elif len(phone) == 9 and phone[0] in '0123456789':
+            phone = '+998' + phone
+        else:
+            phone = '+' + phone
+    
+    logger.info(f"Send OTP request for phone: {phone}")
     
     if UNIMTX_ENABLED:
         # Use Unimtx OTP API
@@ -925,6 +937,7 @@ async def send_otp(data: OtpRequest):
                     f"{UNIMTX_API_BASE}/?action=otp.send&accessKeyId={UNIMTX_ACCESS_KEY_ID}",
                     json={
                         "to": phone,
+                        "channel": "sms",
                         "digits": 6,
                         "ttl": 300,
                     },
@@ -973,9 +986,19 @@ async def verify_otp(data: OtpVerifyRequest):
     phone = data.phone.strip()
     otp_code = data.otp.strip()
     
+    # Remove any spaces, dashes, parentheses
+    phone = phone.replace(' ', '').replace('-', '').replace('(', '').replace(')', '')
+    
     # Ensure phone is in E.164 format
     if not phone.startswith('+'):
-        phone = '+' + phone
+        if phone.startswith('998'):
+            phone = '+' + phone
+        elif len(phone) == 9 and phone[0] in '0123456789':
+            phone = '+998' + phone
+        else:
+            phone = '+' + phone
+    
+    logger.info(f"Verify OTP request for phone: {phone}, code: {otp_code}")
     
     # Verify OTP via Unimtx or locally
     otp_valid = False
