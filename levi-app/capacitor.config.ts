@@ -25,9 +25,11 @@ const config: CapacitorConfig = {
     useLegacyBridge: false
   },
   ios: {
-    // Use https scheme for security (matches Android)
     scheme: 'Levi',
-    contentInset: 'automatic'
+    contentInset: 'never',
+    backgroundColor: '#FFFFFF',
+    scrollEnabled: true,
+    allowsLinkPreview: false
   }
 };
 

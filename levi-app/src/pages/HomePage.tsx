@@ -38,6 +38,7 @@ export default function HomePage() {
   const [alarmPermissionNeeded, setAlarmPermissionNeeded] = useState(false)
   const [overlayPermissionNeeded, setOverlayPermissionNeeded] = useState(false)
   const [showSubscriptionModal, setShowSubscriptionModal] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
 
   const filters: { key: FilterType; label: string }[] = [
     { key: 'all', label: 'Hammasi' },
@@ -151,6 +152,7 @@ export default function HomePage() {
 
   const loadReminders = async () => {
     try {
+      setIsLoading(true)
       const apiReminders = await remindersAPI.getAll()
       const mapped = apiReminders.map((r: APIReminder) => mapAPIReminder(r))
       setReminders(mapped)
@@ -160,6 +162,8 @@ export default function HomePage() {
       await scheduleAlarmsForReminders(pendingReminders)
     } catch (error) {
       console.error('Failed to load reminders:', error)
+    } finally {
+      setIsLoading(false)
     }
   }
 
@@ -471,7 +475,28 @@ export default function HomePage() {
           </div>
         )}
 
-        {Object.entries(groupedReminders).map(([date, reminders]) => (
+        {/* Skeleton Loading */}
+        {isLoading && (
+          <div className={styles.skeletonGroup}>
+            <div className={styles.skeletonDateHeader}>
+              <div className={styles.skeletonLine} style={{ width: '60px', height: '14px' }} />
+              <div className={styles.skeletonLine} style={{ width: '40px', height: '14px' }} />
+            </div>
+            {[1, 2, 3].map((i) => (
+              <div key={i} className={styles.skeletonCard}>
+                <div className={styles.skeletonLine} style={{ width: '70%', height: '17px', marginBottom: '8px' }} />
+                <div className={styles.skeletonLine} style={{ width: '100%', height: '14px', marginBottom: '6px' }} />
+                <div className={styles.skeletonLine} style={{ width: '85%', height: '14px', marginBottom: '14px' }} />
+                <div className={styles.skeletonFooter}>
+                  <div className={styles.skeletonLine} style={{ width: '60px', height: '14px' }} />
+                  <div className={styles.skeletonCircle} />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {!isLoading && Object.entries(groupedReminders).map(([date, reminders]) => (
           <div key={date} className={styles.reminderGroup}>
             <div className={styles.dateHeader}>
               <span className={styles.dateText}>{date}</span>

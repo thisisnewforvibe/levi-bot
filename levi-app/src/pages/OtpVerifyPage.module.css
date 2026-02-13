@@ -1,10 +1,11 @@
 .container {
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
-  min-height: 100dvh;
+  height: 100vh;
+  height: 100dvh;
   background-color: var(--background);
   padding-top: env(safe-area-inset-top);
+  overflow: hidden;
 }
 
 .header {
@@ -37,6 +38,10 @@
   align-items: center;
   padding: 40px 24px;
   animation: fadeInUp 0.4s ease-out;
+  flex: 1;
+  overflow-y: auto;
+  overscroll-behavior: none;
+  -webkit-overflow-scrolling: touch;
 }
 
 @keyframes fadeInUp {

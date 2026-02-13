@@ -1,11 +1,15 @@
 .container {
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
-  min-height: 100dvh;
+  height: 100vh;
+  height: 100dvh;
   background-color: var(--background);
   padding-top: env(safe-area-inset-top);
   animation: fadeIn 0.3s ease-out;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: none;
+  -webkit-overflow-scrolling: touch;
 }
 
 /* Header */
@@ -508,4 +512,67 @@
     padding: 16px 28px;
     font-size: 16px;
   }
+}
+
+/* Skeleton Loading */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.skeletonGroup {
+  animation: fadeInUp 0.3s ease-out forwards;
+}
+
+.skeletonDateHeader {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+}
+
+.skeletonCard {
+  padding: 16px;
+  margin-bottom: 1px;
+  border-bottom: 1px solid var(--divider);
+}
+
+.skeletonCard:first-of-type {
+  border-top: 1px solid var(--divider);
+}
+
+.skeletonLine {
+  background: linear-gradient(
+    90deg,
+    var(--search-bg) 25%,
+    #E8E8E8 50%,
+    var(--search-bg) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+  border-radius: 6px;
+}
+
+.skeletonFooter {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.skeletonCircle {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: linear-gradient(
+    90deg,
+    var(--search-bg) 25%,
+    #E8E8E8 50%,
+    var(--search-bg) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
 }

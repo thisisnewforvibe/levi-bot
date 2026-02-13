@@ -35,19 +35,26 @@ html, body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overflow-x: hidden;
+  /* Prevent iOS bounce/overscroll */
+  overscroll-behavior: none;
+  -webkit-overflow-scrolling: touch;
 }
 
 body {
-  min-height: 100vh;
-  min-height: 100dvh;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
   padding-bottom: env(safe-area-inset-bottom);
+  position: fixed;
+  width: 100%;
 }
 
 #root {
-  min-height: 100vh;
-  min-height: 100dvh;
+  height: 100vh;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 /* Safe area for notch devices */
@@ -59,10 +66,16 @@ body {
   padding-bottom: env(safe-area-inset-bottom);
 }
 
-/* Scrollbar styling */
+/* Scrollbar styling - hide all scrollbars */
 ::-webkit-scrollbar {
-  width: 0;
-  height: 0;
+  width: 0 !important;
+  height: 0 !important;
+  display: none !important;
+}
+
+* {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
 
 /* Disable text selection on UI elements */
