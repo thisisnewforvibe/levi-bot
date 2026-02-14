@@ -16,6 +16,8 @@
 		50B271D11FEDC1A000F3C39B /* public in Resources */ = {isa = PBXBuildFile; fileRef = 50B271D01FEDC1A000F3C39B /* public */; };
 		A084ECDBA7D38E1E42DFC39D /* Pods_App.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = AF277DCFFFF123FFC6DF26C7 /* Pods_App.framework */; };
 		ALARM001ALARM001ALARM001 /* alarm.wav in Resources */ = {isa = PBXBuildFile; fileRef = ALARM002ALARM002ALARM002 /* alarm.wav */; };
+		B1A2C3D4E5F6A7B8C9D0E1F3 /* LeviAlarmKitPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1A2C3D4E5F6A7B8C9D0E1F2 /* LeviAlarmKitPlugin.swift */; };
+		B1A2C3D4E5F6A7B8C9D0E1F5 /* LeviAlarmKitPlugin.m in Sources */ = {isa = PBXBuildFile; fileRef = B1A2C3D4E5F6A7B8C9D0E1F4 /* LeviAlarmKitPlugin.m */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -30,6 +32,8 @@
 		50B271D01FEDC1A000F3C39B /* public */ = {isa = PBXFileReference; lastKnownFileType = folder; path = public; sourceTree = "<group>"; };
 		AF277DCFFFF123FFC6DF26C7 /* Pods_App.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_App.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		ALARM002ALARM002ALARM002 /* alarm.wav */ = {isa = PBXFileReference; lastKnownFileType = audio.wav; path = alarm.wav; sourceTree = "<group>"; };
+		B1A2C3D4E5F6A7B8C9D0E1F2 /* LeviAlarmKitPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeviAlarmKitPlugin.swift; sourceTree = "<group>"; };
+		B1A2C3D4E5F6A7B8C9D0E1F4 /* LeviAlarmKitPlugin.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = LeviAlarmKitPlugin.m; sourceTree = "<group>"; };
 		AF51FD2D460BCFE21FA515B2 /* Pods-App.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-App.release.xcconfig"; path = "Pods/Target Support Files/Pods-App/Pods-App.release.xcconfig"; sourceTree = "<group>"; };
 		FC68EB0AF532CFC21C3344DD /* Pods-App.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-App.debug.xcconfig"; path = "Pods/Target Support Files/Pods-App/Pods-App.debug.xcconfig"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -84,6 +88,8 @@
 				2FAD9762203C412B000D30F8 /* config.xml */,
 				50B271D01FEDC1A000F3C39B /* public */,
 				ALARM002ALARM002ALARM002 /* alarm.wav */,
+				B1A2C3D4E5F6A7B8C9D0E1F2 /* LeviAlarmKitPlugin.swift */,
+				B1A2C3D4E5F6A7B8C9D0E1F4 /* LeviAlarmKitPlugin.m */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -212,6 +218,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				504EC3081FED79650016851F /* AppDelegate.swift in Sources */,
+				B1A2C3D4E5F6A7B8C9D0E1F3 /* LeviAlarmKitPlugin.swift in Sources */,
+				B1A2C3D4E5F6A7B8C9D0E1F5 /* LeviAlarmKitPlugin.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

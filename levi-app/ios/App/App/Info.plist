@@ -48,6 +48,12 @@
 	<!-- Microphone permission for voice recording -->
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Levi needs access to your microphone to record voice reminders.</string>
+	<!-- AlarmKit permission (iOS 26+) - REQUIRED for real alarms -->
+	<key>NSAlarmKitUsageDescription</key>
+	<string>Levi eslatmalarni o'z vaqtida jiringlash uchun budilnik rejimidan foydalanadi.</string>
+	<!-- Live Activities support (required by AlarmKit) -->
+	<key>NSSupportsLiveActivities</key>
+	<true/>
 	<!-- Background modes for audio and notifications -->
 	<key>UIBackgroundModes</key>
 	<array>

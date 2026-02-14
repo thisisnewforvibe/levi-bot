@@ -6,7 +6,7 @@
 
 import { LocalNotifications, ScheduleOptions, PendingLocalNotificationSchema } from '@capacitor/local-notifications';
 import { Capacitor } from '@capacitor/core';
-import LeviAlarm, { LeviAlarmManager } from './leviAlarm';
+import LeviAlarm, { LeviAlarmManager, LeviAlarmKit, isAlarmKitAvailable, requestAlarmKitAuthorization } from './leviAlarm';
 
 // Follow-up delay in milliseconds (30 minutes, same as Telegram bot)
 export const FOLLOW_UP_DELAY_MS = 30 * 60 * 1000;
@@ -28,6 +28,7 @@ type NotificationActionCallback = (reminderId: number, action: 'done' | 'snooze'
 class NotificationService {
   private initialized = false;
   private actionCallback: NotificationActionCallback | null = null;
+  private alarmKitAvailable = false;  // iOS 26+ AlarmKit for real alarms
 
   /**
    * Set callback for notification actions
@@ -71,6 +72,20 @@ class NotificationService {
 
       // Set up notification listeners
       await this.setupListeners();
+      
+      // Check if iOS 26+ AlarmKit is available for real alarms
+      if (Capacitor.getPlatform() === 'ios') {
+        try {
+          this.alarmKitAvailable = await isAlarmKitAvailable();
+          if (this.alarmKitAvailable) {
+            const authorized = await requestAlarmKitAuthorization();
+            console.log(`AlarmKit: available=true, authorized=${authorized}`);
+          }
+        } catch (e) {
+          console.log('AlarmKit check failed, using notifications fallback:', e);
+          this.alarmKitAvailable = false;
+        }
+      }
       
       // Log pending notifications for debugging
       const pending = await LocalNotifications.getPending();
@@ -119,22 +134,45 @@ class NotificationService {
       const reminderId = (extra.reminderId as number) || notificationId;
       const isFollowUp = extra.isFollowUp === true;
       
+      // On iOS: cancel remaining alarm burst notifications when user responds
+      if (Capacitor.getPlatform() === 'ios') {
+        const baseAlarmId = (extra.baseAlarmId as number) || notificationId;
+        if (baseAlarmId > 0) {
+          const burstIds = [];
+          for (let i = 0; i < 10; i++) {
+            burstIds.push({ id: baseAlarmId + i * 10000 });
+          }
+          try {
+            await LocalNotifications.cancel({ notifications: burstIds });
+            console.log(`Cancelled iOS alarm burst for base ID ${baseAlarmId}`);
+          } catch (e) {
+            console.error('Failed to cancel burst:', e);
+          }
+        }
+      }
+      
       // Handle different actions
       if (isFollowUp) {
         // Follow-up notification actions (Yes/No)
-        if (actionId === 'yes') {
+        if (actionId === 'yes' || actionId === 'FOLLOWUP_YES') {
           // User confirmed task is completed - mark as done
           console.log('Task confirmed done via follow-up:', reminderId);
           this.actionCallback?.(reminderId, 'done');
-        } else if (actionId === 'no' || actionId === 'tap') {
+        } else if (actionId === 'no' || actionId === 'FOLLOWUP_NO' || actionId === 'tap') {
           // User didn't complete - schedule another follow-up in 30 minutes
+          // On iOS with AlarmKit, AppDelegate handles rescheduling natively
+          // On Android, schedule via JS
           console.log('Task not done, scheduling another follow-up:', reminderId);
-          await this.scheduleFollowUp(reminderId, extra.taskText as string);
+          if (Capacitor.getPlatform() !== 'ios' || !this.alarmKitAvailable) {
+            await this.scheduleFollowUp(reminderId, extra.taskText as string);
+          }
           this.actionCallback?.(reminderId, 'no');
         } else {
           // Tapped notification without selecting action - treat as "no"
           console.log('Follow-up tapped, scheduling another follow-up:', reminderId);
-          await this.scheduleFollowUp(reminderId, extra.taskText as string);
+          if (Capacitor.getPlatform() !== 'ios' || !this.alarmKitAvailable) {
+            await this.scheduleFollowUp(reminderId, extra.taskText as string);
+          }
         }
       } else {
         // Initial alarm notification actions
@@ -324,7 +362,8 @@ class NotificationService {
       });
       
       // On Android, use native AlarmManager for reliable alarm with sound
-      // On iOS, use Capacitor LocalNotifications (which uses UNUserNotificationCenter)
+      // On iOS 26+, use AlarmKit for REAL full-screen alarm (like Alarmy)
+      // On iOS < 26, schedule BURST of 10 notifications 30s apart = alarm effect
       if (Capacitor.getPlatform() === 'android') {
         const nativeAlarms = alarms.map(alarm => ({
           id: alarm.id,
@@ -339,26 +378,68 @@ class NotificationService {
         console.log(`Native AlarmManager scheduled ${result.scheduled} alarms`);
         console.log(`✓ ${alarms.length} alarms scheduled with native AlarmManager (sound guaranteed)`);
       } else {
-        // iOS path - use Capacitor LocalNotifications
-        const notifications = alarms.map((alarm) => ({
-          id: alarm.id,
-          title: '🔔 Eslatma',
-          body: alarm.body,
-          schedule: {
-            at: alarm.scheduledTime,
-            allowWhileIdle: true,
-          },
-          sound: 'alarm.wav',
-          extra: { 
-            ...alarm.extra,
-            taskText: alarm.body,
-            isFollowUp: false,
-          },
-          actionTypeId: 'reminder_actions',
-        }));
+        // iOS path
+        if (this.alarmKitAvailable) {
+          // iOS 26+: Use AlarmKit for REAL alarm (full-screen, "slide to stop")
+          const alarmKitAlarms = alarms.map(alarm => ({
+            id: alarm.id,
+            title: '🔔 Eslatma',
+            body: alarm.body,
+            triggerTime: alarm.scheduledTime.getTime(),
+          }));
+          
+          console.log('📢 Scheduling via AlarmKit (real alarm):', alarmKitAlarms.length);
+          const result = await LeviAlarmKit.scheduleMultiple({ alarms: alarmKitAlarms });
+          console.log(`✅ AlarmKit scheduled ${result.scheduled}/${result.total} alarms`);
+          if (result.errors && result.errors.length > 0) {
+            console.warn('AlarmKit errors:', result.errors);
+          }
+        } else {
+          // iOS < 26 fallback: Schedule BURST of 10 notifications per alarm, 30s apart
+          const BURST_COUNT = 10;
+          const BURST_INTERVAL_SEC = 30;
+        const allNotifications: Array<{
+          id: number;
+          title: string;
+          body: string;
+          schedule: { at: Date; allowWhileIdle: boolean };
+          sound: string;
+          extra: Record<string, unknown>;
+        }> = [];
 
-        await LocalNotifications.schedule({ notifications });
-        console.log(`✓ ${alarms.length} alarms scheduled via Capacitor LocalNotifications (iOS)`);
+        for (const alarm of alarms) {
+          for (let i = 0; i < BURST_COUNT; i++) {
+            const burstTime = new Date(alarm.scheduledTime.getTime() + i * BURST_INTERVAL_SEC * 1000);
+            
+            // Only schedule if in the future
+            if (burstTime.getTime() <= Date.now()) continue;
+            
+            allNotifications.push({
+              id: alarm.id + i * 10000,  // Unique ID per burst: base + i*10000
+              title: '🔔 Eslatma',
+              body: alarm.body,
+              schedule: {
+                at: burstTime,
+                allowWhileIdle: true,
+              },
+              sound: 'alarm.wav',
+              extra: {
+                ...alarm.extra,
+                taskText: alarm.body,
+                isFollowUp: false,
+                baseAlarmId: alarm.id,
+                burstIndex: i,
+              },
+            });
+          }
+          console.log(`  Alarm ${alarm.id}: ${BURST_COUNT} burst notifications from ${alarm.scheduledTime.toLocaleString()}`);
+        }
+
+        if (allNotifications.length > 0) {
+          await LocalNotifications.schedule({ notifications: allNotifications as any });
+        }
+        console.log(`✓ ${allNotifications.length} alarm burst notifications scheduled for ${alarms.length} alarms (iOS)`);
+        } // end iOS < 26 fallback
       }
       
       return true;
@@ -404,6 +485,16 @@ class NotificationService {
    */
   async cancelAlarm(id: number): Promise<boolean> {
     try {
+      // Cancel via AlarmKit on iOS 26+ 
+      if (Capacitor.getPlatform() === 'ios' && this.alarmKitAvailable) {
+        try {
+          await LeviAlarmKit.cancelAlarm({ id });
+          console.log('AlarmKit alarm cancelled:', id);
+        } catch (e) {
+          console.log('AlarmKit cancel (may not exist):', e);
+        }
+      }
+      // Also cancel any regular notifications (follow-ups, bursts, etc.)
       await LocalNotifications.cancel({ notifications: [{ id }] });
       console.log('Alarm cancelled:', id);
       return true;
@@ -418,6 +509,16 @@ class NotificationService {
    */
   async cancelAllAlarms(): Promise<boolean> {
     try {
+      // Cancel all AlarmKit alarms on iOS 26+
+      if (Capacitor.getPlatform() === 'ios' && this.alarmKitAvailable) {
+        try {
+          await LeviAlarmKit.cancelAll();
+          console.log('All AlarmKit alarms cancelled');
+        } catch (e) {
+          console.log('AlarmKit cancelAll error:', e);
+        }
+      }
+      // Also cancel all regular notifications
       const pending = await LocalNotifications.getPending();
       if (pending.notifications.length > 0) {
         await LocalNotifications.cancel({

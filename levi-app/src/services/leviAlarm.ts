@@ -26,8 +26,48 @@ export interface LeviAlarmManagerPlugin {
   stopAlarm(): Promise<{ success: boolean }>;
 }
 
+// iOS 26+ AlarmKit plugin interface (real alarm with full-screen UI)
+export interface LeviAlarmKitPlugin {
+  isAvailable(): Promise<{ available: boolean }>;
+  requestAuthorization(): Promise<{ authorized: boolean; state: string }>;
+  scheduleAlarm(options: { id: number; title: string; body: string; triggerTime: number; reminderId?: number }): Promise<{ success: boolean; id: number; uuid: string }>;
+  scheduleMultiple(options: { alarms: AlarmScheduleOptions[] }): Promise<{ success: boolean; scheduled: number; total: number; errors: string[] }>;
+  cancelAlarm(options: { id: number }): Promise<{ success: boolean }>;
+  cancelAll(): Promise<{ success: boolean; cancelled: number }>;
+  stopAlarm(options: { id: number }): Promise<{ success: boolean }>;
+}
+
 const LeviAlarm = registerPlugin<LeviAlarmPlugin>('LeviAlarm');
 const LeviAlarmManager = registerPlugin<LeviAlarmManagerPlugin>('LeviAlarmManager');
+const LeviAlarmKit = registerPlugin<LeviAlarmKitPlugin>('LeviAlarmKit');
+
+/**
+ * Check if iOS 26+ AlarmKit is available
+ */
+export async function isAlarmKitAvailable(): Promise<boolean> {
+  try {
+    const result = await LeviAlarmKit.isAvailable();
+    console.log('AlarmKit available:', result.available);
+    return result.available;
+  } catch (error) {
+    console.log('AlarmKit not available (not iOS 26+)');
+    return false;
+  }
+}
+
+/**
+ * Request AlarmKit authorization (iOS 26+)
+ */
+export async function requestAlarmKitAuthorization(): Promise<boolean> {
+  try {
+    const result = await LeviAlarmKit.requestAuthorization();
+    console.log('AlarmKit authorization:', result);
+    return result.authorized;
+  } catch (error) {
+    console.error('AlarmKit authorization error:', error);
+    return false;
+  }
+}
 
 /**
  * Check if exact alarms are allowed and prompt user to enable if not
@@ -75,5 +115,5 @@ export async function requestOverlayPermission(): Promise<void> {
   }
 }
 
-export { LeviAlarm, LeviAlarmManager };
+export { LeviAlarm, LeviAlarmManager, LeviAlarmKit };
 export default LeviAlarm;
