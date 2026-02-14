@@ -16,8 +16,9 @@ import httpx
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, Depends, Header, UploadFile, File, BackgroundTasks, Body
+from fastapi import FastAPI, HTTPException, Depends, Header, UploadFile, File, BackgroundTasks, Body, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 # Configure logging
@@ -30,6 +31,7 @@ JWT_ALGORITHM = 'HS256'
 JWT_EXPIRATION_HOURS = 24 * 30  # 30 days
 FOLLOW_UP_DELAY_SECONDS = 1800  # 30 minutes
 DEFAULT_TIMEZONE = 'Asia/Tashkent'
+ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', 'levi2026admin')
 
 # OTP Storage (in-memory fallback, expires after 5 minutes)
 # Format: {phone: {"code": "123456", "expires": datetime, "attempts": 0}}
@@ -1630,6 +1632,406 @@ async def update_fcm_token(data: FCMTokenUpdate, user_id: int = Depends(get_curr
         await db.execute("UPDATE app_users SET fcm_token = ? WHERE id = ?", (data.fcm_token, user_id))
         await db.commit()
         return {"success": True}
+
+
+# ===== Admin Panel =====
+
+def verify_admin(password: str = Query(...)):
+    """Verify admin password from query param."""
+    if password != ADMIN_PASSWORD:
+        raise HTTPException(status_code=403, detail="Invalid admin password")
+    return True
+
+
+@app.get("/admin/api/stats")
+async def admin_stats(authorized: bool = Depends(verify_admin)):
+    """Get dashboard stats."""
+    stats = {
+        "total_users": 0, "total_reminders": 0, "pending_reminders": 0,
+        "done_reminders": 0, "today_reminders": 0, "today_users": 0,
+        "users": [], "recent_reminders": []
+    }
+    
+    queries = {
+        "total_users": "SELECT COUNT(*) FROM app_users",
+        "total_reminders": "SELECT COUNT(*) FROM app_reminders",
+        "pending_reminders": "SELECT COUNT(*) FROM app_reminders WHERE status = 'pending'",
+        "done_reminders": "SELECT COUNT(*) FROM app_reminders WHERE status = 'done'",
+        "today_reminders": "SELECT COUNT(*) FROM app_reminders WHERE DATE(created_at) = DATE('now')",
+        "today_users": "SELECT COUNT(*) FROM app_users WHERE DATE(created_at) = DATE('now')",
+    }
+    
+    users_query = """
+        SELECT u.id, u.phone, u.name, u.timezone, u.language, u.created_at,
+            (SELECT COUNT(*) FROM app_reminders WHERE user_id = u.id) as reminder_count,
+            (SELECT COUNT(*) FROM app_reminders WHERE user_id = u.id AND status = 'pending') as pending_count
+        FROM app_users u ORDER BY u.created_at DESC
+    """
+    
+    reminders_query = """
+        SELECT r.id, r.task_text, r.status, r.scheduled_time_utc, r.created_at,
+            r.recurrence_type, u.name, u.phone
+        FROM app_reminders r
+        JOIN app_users u ON r.user_id = u.id
+        ORDER BY r.created_at DESC LIMIT 50
+    """
+    
+    if USE_TURSO and LIBSQL_AVAILABLE:
+        conn = get_db_connection()
+        if conn:
+            cursor = conn.cursor()
+            for key, q in queries.items():
+                cursor.execute(q)
+                row = cursor.fetchone()
+                stats[key] = row[0] if row else 0
+            
+            cursor.execute(users_query)
+            for row in cursor.fetchall():
+                stats["users"].append({
+                    "id": row[0], "phone": row[1], "name": row[2],
+                    "timezone": row[3], "language": row[4], "created_at": str(row[5]),
+                    "reminder_count": row[6], "pending_count": row[7]
+                })
+            
+            cursor.execute(reminders_query)
+            for row in cursor.fetchall():
+                stats["recent_reminders"].append({
+                    "id": row[0], "task_text": row[1], "status": row[2],
+                    "scheduled_time": str(row[3]), "created_at": str(row[4]),
+                    "recurrence": row[5], "user_name": row[6], "user_phone": row[7]
+                })
+            conn.close()
+    else:
+        import aiosqlite as aiosqlite_mod
+        async with aiosqlite_mod.connect(DATABASE_PATH) as db:
+            for key, q in queries.items():
+                cursor = await db.execute(q)
+                row = await cursor.fetchone()
+                stats[key] = row[0] if row else 0
+            
+            cursor = await db.execute(users_query)
+            for row in await cursor.fetchall():
+                stats["users"].append({
+                    "id": row[0], "phone": row[1], "name": row[2],
+                    "timezone": row[3], "language": row[4], "created_at": str(row[5]),
+                    "reminder_count": row[6], "pending_count": row[7]
+                })
+            
+            cursor = await db.execute(reminders_query)
+            for row in await cursor.fetchall():
+                stats["recent_reminders"].append({
+                    "id": row[0], "task_text": row[1], "status": row[2],
+                    "scheduled_time": str(row[3]), "created_at": str(row[4]),
+                    "recurrence": row[5], "user_name": row[6], "user_phone": row[7]
+                })
+    
+    return stats
+
+
+@app.get("/admin/api/user/{user_id}/reminders")
+async def admin_user_reminders(user_id: int, authorized: bool = Depends(verify_admin)):
+    """Get all reminders for a specific user."""
+    query = """
+        SELECT id, task_text, notes, location, scheduled_time_utc, status, 
+               recurrence_type, created_at
+        FROM app_reminders WHERE user_id = ? ORDER BY created_at DESC
+    """
+    reminders = []
+    
+    if USE_TURSO and LIBSQL_AVAILABLE:
+        conn = get_db_connection()
+        if conn:
+            cursor = conn.cursor()
+            cursor.execute(query, (user_id,))
+            for row in cursor.fetchall():
+                reminders.append({
+                    "id": row[0], "task_text": row[1], "notes": row[2],
+                    "location": row[3], "scheduled_time": str(row[4]),
+                    "status": row[5], "recurrence": row[6], "created_at": str(row[7])
+                })
+            conn.close()
+    else:
+        import aiosqlite as aiosqlite_mod
+        async with aiosqlite_mod.connect(DATABASE_PATH) as db:
+            cursor = await db.execute(query, (user_id,))
+            for row in await cursor.fetchall():
+                reminders.append({
+                    "id": row[0], "task_text": row[1], "notes": row[2],
+                    "location": row[3], "scheduled_time": str(row[4]),
+                    "status": row[5], "recurrence": row[6], "created_at": str(row[7])
+                })
+    
+    return {"reminders": reminders}
+
+
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_dashboard():
+    """Serve admin dashboard HTML."""
+    return ADMIN_HTML
+
+
+ADMIN_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Levi Admin Panel</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; }
+.login-container { display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+.login-box { background: #1e293b; padding: 40px; border-radius: 16px; width: 360px; text-align: center; box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
+.login-box h1 { font-size: 28px; margin-bottom: 8px; }
+.login-box p { color: #94a3b8; margin-bottom: 24px; }
+.login-box input { width: 100%; padding: 12px 16px; background: #0f172a; border: 1px solid #334155; border-radius: 8px; color: #e2e8f0; font-size: 16px; margin-bottom: 16px; outline: none; }
+.login-box input:focus { border-color: #3b82f6; }
+.login-box button { width: 100%; padding: 12px; background: #3b82f6; border: none; border-radius: 8px; color: white; font-size: 16px; font-weight: 600; cursor: pointer; }
+.login-box button:hover { background: #2563eb; }
+.error { color: #ef4444; font-size: 14px; margin-bottom: 12px; display: none; }
+
+.dashboard { display: none; }
+.topbar { background: #1e293b; padding: 16px 32px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; }
+.topbar h1 { font-size: 22px; }
+.topbar .badge { background: #22c55e; color: white; padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+.logout-btn { background: #ef4444; border: none; color: white; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 14px; }
+.logout-btn:hover { background: #dc2626; }
+
+.content { padding: 24px 32px; max-width: 1400px; margin: 0 auto; }
+.stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 32px; }
+.stat-card { background: #1e293b; padding: 24px; border-radius: 12px; border: 1px solid #334155; }
+.stat-card .label { color: #94a3b8; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; }
+.stat-card .value { font-size: 36px; font-weight: 700; margin-top: 8px; }
+.stat-card .value.blue { color: #3b82f6; }
+.stat-card .value.green { color: #22c55e; }
+.stat-card .value.yellow { color: #eab308; }
+.stat-card .value.red { color: #ef4444; }
+.stat-card .value.purple { color: #a855f7; }
+
+.section { margin-bottom: 32px; }
+.section h2 { font-size: 20px; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+.section h2 .count { background: #334155; padding: 2px 10px; border-radius: 10px; font-size: 14px; color: #94a3b8; }
+
+table { width: 100%; border-collapse: collapse; background: #1e293b; border-radius: 12px; overflow: hidden; }
+th { text-align: left; padding: 12px 16px; background: #0f172a; color: #94a3b8; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+td { padding: 12px 16px; border-top: 1px solid #334155; font-size: 14px; }
+tr:hover td { background: #263044; }
+.status { padding: 4px 10px; border-radius: 6px; font-size: 12px; font-weight: 600; display: inline-block; }
+.status.pending { background: #fef3c7; color: #92400e; }
+.status.done { background: #d1fae5; color: #065f46; }
+.phone { color: #94a3b8; font-family: monospace; }
+.clickable { cursor: pointer; color: #3b82f6; }
+.clickable:hover { text-decoration: underline; }
+
+.modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); z-index: 100; justify-content: center; align-items: flex-start; padding-top: 60px; }
+.modal-overlay.active { display: flex; }
+.modal { background: #1e293b; border-radius: 16px; width: 700px; max-height: 80vh; overflow-y: auto; padding: 24px; }
+.modal h3 { font-size: 18px; margin-bottom: 16px; }
+.modal .close-btn { float: right; background: #334155; border: none; color: #e2e8f0; padding: 6px 12px; border-radius: 6px; cursor: pointer; }
+.modal .close-btn:hover { background: #475569; }
+
+.refresh-btn { background: #334155; border: none; color: #e2e8f0; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 14px; }
+.refresh-btn:hover { background: #475569; }
+
+@media (max-width: 768px) {
+    .content { padding: 16px; }
+    .stats-grid { grid-template-columns: repeat(2, 1fr); }
+    table { font-size: 12px; }
+    th, td { padding: 8px 10px; }
+    .modal { width: 95%; }
+}
+</style>
+</head>
+<body>
+
+<!-- Login Screen -->
+<div class="login-container" id="loginScreen">
+  <div class="login-box">
+    <h1>🔔 Levi Admin</h1>
+    <p>Admin panelga kirish</p>
+    <div class="error" id="loginError">Noto'g'ri parol</div>
+    <input type="password" id="passwordInput" placeholder="Parolni kiriting..." onkeydown="if(event.key==='Enter')login()">
+    <button onclick="login()">Kirish</button>
+  </div>
+</div>
+
+<!-- Dashboard -->
+<div class="dashboard" id="dashboard">
+  <div class="topbar">
+    <div style="display:flex;align-items:center;gap:12px;">
+      <h1>🔔 Levi Admin</h1>
+      <span class="badge">LIVE</span>
+    </div>
+    <div style="display:flex;gap:8px;">
+      <button class="refresh-btn" onclick="loadData()">🔄 Yangilash</button>
+      <button class="logout-btn" onclick="logout()">Chiqish</button>
+    </div>
+  </div>
+
+  <div class="content">
+    <!-- Stats -->
+    <div class="stats-grid">
+      <div class="stat-card"><div class="label">Foydalanuvchilar</div><div class="value blue" id="statUsers">-</div></div>
+      <div class="stat-card"><div class="label">Jami eslatmalar</div><div class="value purple" id="statReminders">-</div></div>
+      <div class="stat-card"><div class="label">Kutilmoqda</div><div class="value yellow" id="statPending">-</div></div>
+      <div class="stat-card"><div class="label">Bajarildi</div><div class="value green" id="statDone">-</div></div>
+      <div class="stat-card"><div class="label">Bugun eslatmalar</div><div class="value red" id="statToday">-</div></div>
+      <div class="stat-card"><div class="label">Bugun yangi users</div><div class="value blue" id="statTodayUsers">-</div></div>
+    </div>
+
+    <!-- Users -->
+    <div class="section">
+      <h2>Foydalanuvchilar <span class="count" id="usersCount">0</span></h2>
+      <table>
+        <thead><tr><th>ID</th><th>Ism</th><th>Telefon</th><th>Til</th><th>Eslatmalar</th><th>Kutilmoqda</th><th>Ro'yxatdan o'tgan</th></tr></thead>
+        <tbody id="usersTable"></tbody>
+      </table>
+    </div>
+
+    <!-- Recent Reminders -->
+    <div class="section">
+      <h2>So'nggi eslatmalar <span class="count" id="remindersCount">0</span></h2>
+      <table>
+        <thead><tr><th>ID</th><th>Foydalanuvchi</th><th>Vazifa</th><th>Holat</th><th>Rejalashtirilgan</th><th>Yaratilgan</th></tr></thead>
+        <tbody id="remindersTable"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- User Detail Modal -->
+<div class="modal-overlay" id="userModal">
+  <div class="modal">
+    <button class="close-btn" onclick="closeModal()">✕</button>
+    <h3 id="modalTitle">Foydalanuvchi</h3>
+    <table>
+      <thead><tr><th>Vazifa</th><th>Holat</th><th>Vaqt</th><th>Takrorlanish</th><th>Yaratilgan</th></tr></thead>
+      <tbody id="modalReminders"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+let adminPassword = '';
+const API = window.location.origin;
+
+function login() {
+  adminPassword = document.getElementById('passwordInput').value;
+  fetch(`${API}/admin/api/stats?password=${encodeURIComponent(adminPassword)}`)
+    .then(r => { if (!r.ok) throw new Error('bad'); return r.json(); })
+    .then(data => {
+      localStorage.setItem('levi_admin_pw', adminPassword);
+      document.getElementById('loginScreen').style.display = 'none';
+      document.getElementById('dashboard').style.display = 'block';
+      renderData(data);
+    })
+    .catch(() => {
+      document.getElementById('loginError').style.display = 'block';
+    });
+}
+
+function logout() {
+  localStorage.removeItem('levi_admin_pw');
+  adminPassword = '';
+  document.getElementById('dashboard').style.display = 'none';
+  document.getElementById('loginScreen').style.display = 'flex';
+  document.getElementById('passwordInput').value = '';
+}
+
+function loadData() {
+  fetch(`${API}/admin/api/stats?password=${encodeURIComponent(adminPassword)}`)
+    .then(r => r.json())
+    .then(renderData)
+    .catch(e => console.error('Load failed:', e));
+}
+
+function renderData(data) {
+  document.getElementById('statUsers').textContent = data.total_users;
+  document.getElementById('statReminders').textContent = data.total_reminders;
+  document.getElementById('statPending').textContent = data.pending_reminders;
+  document.getElementById('statDone').textContent = data.done_reminders;
+  document.getElementById('statToday').textContent = data.today_reminders;
+  document.getElementById('statTodayUsers').textContent = data.today_users;
+  document.getElementById('usersCount').textContent = data.users.length;
+  document.getElementById('remindersCount').textContent = data.recent_reminders.length;
+
+  // Users table
+  const ut = document.getElementById('usersTable');
+  ut.innerHTML = data.users.map(u => `
+    <tr>
+      <td>${u.id}</td>
+      <td class="clickable" onclick="showUser(${u.id}, '${(u.name||'').replace(/'/g,"\\\\'")}')"><strong>${u.name || '-'}</strong></td>
+      <td class="phone">${u.phone}</td>
+      <td>${u.language || 'uz'}</td>
+      <td>${u.reminder_count}</td>
+      <td>${u.pending_count}</td>
+      <td>${formatDate(u.created_at)}</td>
+    </tr>
+  `).join('');
+
+  // Reminders table
+  const rt = document.getElementById('remindersTable');
+  rt.innerHTML = data.recent_reminders.map(r => `
+    <tr>
+      <td>${r.id}</td>
+      <td>${r.user_name || '-'} <span class="phone">${r.user_phone}</span></td>
+      <td>${r.task_text}</td>
+      <td><span class="status ${r.status}">${r.status === 'done' ? 'Bajarildi' : 'Kutilmoqda'}</span></td>
+      <td>${formatDate(r.scheduled_time)}</td>
+      <td>${formatDate(r.created_at)}</td>
+    </tr>
+  `).join('');
+}
+
+function showUser(userId, name) {
+  document.getElementById('modalTitle').textContent = `${name} — Barcha eslatmalar`;
+  document.getElementById('userModal').classList.add('active');
+  
+  fetch(`${API}/admin/api/user/${userId}/reminders?password=${encodeURIComponent(adminPassword)}`)
+    .then(r => r.json())
+    .then(data => {
+      const tb = document.getElementById('modalReminders');
+      tb.innerHTML = data.reminders.map(r => `
+        <tr>
+          <td>${r.task_text}</td>
+          <td><span class="status ${r.status}">${r.status === 'done' ? 'Bajarildi' : 'Kutilmoqda'}</span></td>
+          <td>${formatDate(r.scheduled_time)}</td>
+          <td>${r.recurrence || '-'}</td>
+          <td>${formatDate(r.created_at)}</td>
+        </tr>
+      `).join('');
+    });
+}
+
+function closeModal() {
+  document.getElementById('userModal').classList.remove('active');
+}
+
+function formatDate(d) {
+  if (!d || d === 'None') return '-';
+  try {
+    const dt = new Date(d);
+    if (isNaN(dt)) return d;
+    return dt.toLocaleString('uz-UZ', { day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit' });
+  } catch { return d; }
+}
+
+// Auto-login from stored password
+window.addEventListener('DOMContentLoaded', () => {
+  const saved = localStorage.getItem('levi_admin_pw');
+  if (saved) {
+    adminPassword = saved;
+    document.getElementById('passwordInput').value = saved;
+    login();
+  }
+});
+
+// Auto-refresh every 30 seconds
+setInterval(() => {
+  if (adminPassword) loadData();
+}, 30000);
+</script>
+</body>
+</html>"""
 
 
 # ===== Health Check =====
