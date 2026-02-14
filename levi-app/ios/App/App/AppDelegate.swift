@@ -26,6 +26,15 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         // Register notification categories as fallback for older iOS
         registerNotificationCategories()
         
+        // Re-register categories after Capacitor plugins initialize
+        // (Capacitor's LocalNotifications plugin overwrites categories with setNotificationCategories)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3.0) { [weak self] in
+            self?.mergeNotificationCategories()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8.0) { [weak self] in
+            self?.mergeNotificationCategories()
+        }
+        
         // Configure audio session for alarm playback (plays through speaker even in silent mode)
         do {
             try AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [.mixWithOthers])
@@ -116,6 +125,41 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         }
         
         print("✅ Notification categories registered (alarm + follow-up)")
+    }
+    
+    /// Merge our custom categories with whatever Capacitor has set (non-destructive)
+    func mergeNotificationCategories() {
+        let center = UNUserNotificationCenter.current()
+        center.getNotificationCategories { [weak self] existingCategories in
+            guard self != nil else { return }
+            
+            let hasAlarm = existingCategories.contains { $0.identifier == "LEVI_ALARM" }
+            let hasFollowUp = existingCategories.contains { $0.identifier == "LEVI_FOLLOWUP" }
+            
+            if hasAlarm && hasFollowUp {
+                print("✅ Categories already present (\(existingCategories.count) total)")
+                return
+            }
+            
+            var updatedCategories = existingCategories
+            
+            if !hasAlarm {
+                let stopAction = UNNotificationAction(identifier: "STOP_ALARM", title: "⏹ To'xtatish", options: [.destructive, .foreground])
+                let snoozeAction = UNNotificationAction(identifier: "SNOOZE_ALARM", title: "⏰ 10 daqiqa", options: [])
+                let alarmCategory = UNNotificationCategory(identifier: "LEVI_ALARM", actions: [stopAction, snoozeAction], intentIdentifiers: [], options: [.customDismissAction])
+                updatedCategories.insert(alarmCategory)
+            }
+            
+            if !hasFollowUp {
+                let yesAction = UNNotificationAction(identifier: "FOLLOWUP_YES", title: "✅ Ha, bajardim", options: [.foreground])
+                let noAction = UNNotificationAction(identifier: "FOLLOWUP_NO", title: "❌ Yo'q, hali", options: [])
+                let followUpCategory = UNNotificationCategory(identifier: "LEVI_FOLLOWUP", actions: [yesAction, noAction], intentIdentifiers: [], options: [.customDismissAction])
+                updatedCategories.insert(followUpCategory)
+            }
+            
+            center.setNotificationCategories(updatedCategories)
+            print("✅ Merged categories: added missing ones, total=\(updatedCategories.count)")
+        }
     }
 
     // MARK: - Alarm Playback (fallback for foreground on older iOS)

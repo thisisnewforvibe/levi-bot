@@ -58,6 +58,10 @@ class FollowUpScheduler {
     func scheduleFollowUp(reminderId: Int, taskText: String, delaySeconds: TimeInterval) {
         let center = UNUserNotificationCenter.current()
         
+        // Re-register follow-up category before scheduling
+        // (Capacitor's LocalNotifications plugin may overwrite categories)
+        self.ensureFollowUpCategory()
+        
         let content = UNMutableNotificationContent()
         content.title = "⏰ Vazifa bajarildimi?"
         content.body = taskText
@@ -83,6 +87,43 @@ class FollowUpScheduler {
             } else {
                 print("✅ Follow-up scheduled: reminderId=\(reminderId), delay=\(Int(delaySeconds/60))min")
             }
+        }
+    }
+    
+    /// Ensure LEVI_FOLLOWUP category exists (adds to existing categories, doesn't replace them)
+    private func ensureFollowUpCategory() {
+        let center = UNUserNotificationCenter.current()
+        center.getNotificationCategories { existingCategories in
+            // Check if LEVI_FOLLOWUP already exists
+            let hasFollowUp = existingCategories.contains { $0.identifier == "LEVI_FOLLOWUP" }
+            if hasFollowUp {
+                print("✅ LEVI_FOLLOWUP category already registered")
+                return
+            }
+            
+            // Add our categories to the existing set (don't overwrite)
+            var updatedCategories = existingCategories
+            
+            let yesAction = UNNotificationAction(
+                identifier: "FOLLOWUP_YES",
+                title: "✅ Ha, bajardim",
+                options: [.foreground]
+            )
+            let noAction = UNNotificationAction(
+                identifier: "FOLLOWUP_NO",
+                title: "❌ Yo'q, hali",
+                options: []
+            )
+            let followUpCategory = UNNotificationCategory(
+                identifier: "LEVI_FOLLOWUP",
+                actions: [yesAction, noAction],
+                intentIdentifiers: [],
+                options: [.customDismissAction]
+            )
+            updatedCategories.insert(followUpCategory)
+            
+            center.setNotificationCategories(updatedCategories)
+            print("✅ LEVI_FOLLOWUP category added to \(updatedCategories.count) total categories")
         }
     }
 }
