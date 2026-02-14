@@ -17,6 +17,7 @@ interface Reminder {
   duration: string
   date: string
   time: string
+  timestamp: number
   isToday: boolean
   isDone: boolean
   notes?: string
@@ -240,6 +241,7 @@ export default function HomePage() {
       duration: '00:00',
       date: dateText,
       time: scheduledDate.toLocaleTimeString('uz-UZ', { hour: '2-digit', minute: '2-digit' }),
+      timestamp: scheduledDate.getTime(),
       isToday,
       isDone: r.status === 'done',
     }
@@ -349,10 +351,10 @@ export default function HomePage() {
     return true
   })
 
-  // Sort: active (not done) reminders first, then done
+  // Sort: active first, then by newest (most recent) at top
   const sortedReminders = [...filteredReminders].sort((a, b) => {
-    if (a.isDone === b.isDone) return 0
-    return a.isDone ? 1 : -1
+    if (a.isDone !== b.isDone) return a.isDone ? 1 : -1
+    return b.timestamp - a.timestamp
   })
 
   const groupedReminders = sortedReminders.reduce((acc, reminder) => {
