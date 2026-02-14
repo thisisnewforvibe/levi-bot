@@ -349,7 +349,13 @@ export default function HomePage() {
     return true
   })
 
-  const groupedReminders = filteredReminders.reduce((acc, reminder) => {
+  // Sort: active (not done) reminders first, then done
+  const sortedReminders = [...filteredReminders].sort((a, b) => {
+    if (a.isDone === b.isDone) return 0
+    return a.isDone ? 1 : -1
+  })
+
+  const groupedReminders = sortedReminders.reduce((acc, reminder) => {
     const key = reminder.isToday ? 'Bugun' : reminder.date
     if (!acc[key]) acc[key] = []
     acc[key].push(reminder)
