@@ -631,8 +631,53 @@ async def get_current_user(authorization: Optional[str] = Header(None)) -> int:
 
 
 # ===== Voice Transcription =====
+
+async def normalize_transcription(raw_text: str) -> str:
+    """
+    Use Gemini to normalize transcription output to clean Uzbek Latin or Russian.
+    Fixes cases where ElevenLabs outputs Turkish, Kazakh, Kyrgyz, or Uzbek Cyrillic.
+    """
+    if not gemini_model or not raw_text or len(raw_text.strip()) < 2:
+        return raw_text
+    
+    try:
+        prompt = f"""Sen transkripsiya natijasini to'g'irlash uchun yordamchisan.
+
+Quyidagi matn ovozdan yozilgan, lekin noto'g'ri til sifatida aniqlangan bo'lishi mumkin (turk, qozoq, qirg'iz, o'zbek kirill yoki boshqa).
+
+Asl transkripsiya: "{raw_text}"
+
+VAZIFA:
+1. Agar matn o'zbek tilida aytilgan bo'lsa — uni O'ZBEK LOTIN ALIFBOSIDA qayta yoz (to'g'ri imlo bilan)
+2. Agar matn rus tilida aytilgan bo'lsa — uni RUSCHA qoldir (kirill alifbosida)
+3. Turk, qozoq, qirg'iz so'zlarini o'zbek ekvivalentiga almashtir
+4. O'zbek kirill harflarini lotin harflariga o'gir (ш→sh, ч→ch, ғ→g', ў→o', қ→q, ҳ→h va h.k.)
+5. Hech qanday qo'shimcha izoh yoki tushuntirish YOZMA — faqat toza matnni qaytar
+
+FAQAT toza, to'g'irlangan matnni qaytar, boshqa hech narsa yo'q:"""
+
+        response = gemini_model.generate_content(prompt)
+        normalized = response.text.strip()
+        
+        # Remove any markdown formatting or quotes Gemini might add
+        if normalized.startswith('"') and normalized.endswith('"'):
+            normalized = normalized[1:-1]
+        if normalized.startswith("'") and normalized.endswith("'"):
+            normalized = normalized[1:-1]
+        if normalized.startswith('```') and normalized.endswith('```'):
+            normalized = normalized[3:-3].strip()
+        
+        if len(normalized) > 0:
+            logger.info(f"Transcription normalized: '{raw_text}' → '{normalized}'")
+            return normalized
+        return raw_text
+    except Exception as e:
+        logger.warning(f"Transcription normalization failed: {e}")
+        return raw_text
+
+
 async def transcribe_audio_elevenlabs(file_path: str, language: str = "uz") -> Optional[str]:
-    """Transcribe audio using ElevenLabs Scribe."""
+    """Transcribe audio using ElevenLabs Scribe, then normalize to Uzbek Latin or Russian."""
     if not ELEVENLABS_AVAILABLE or not ELEVENLABS_API_KEY:
         logger.warning("ElevenLabs not available")
         return None
@@ -641,7 +686,8 @@ async def transcribe_audio_elevenlabs(file_path: str, language: str = "uz") -> O
         client = ElevenLabs(api_key=ELEVENLABS_API_KEY)
         
         with open(file_path, 'rb') as audio_file:
-            language_code = "uzb" if language == "uz" else "rus" if language == "ru" else None
+            # Always force Uzbek — we normalize to Latin/Russian after
+            language_code = "uzb" if language == "uz" else "rus" if language == "ru" else "uzb"
             
             result = client.speech_to_text.convert(
                 file=audio_file,
@@ -649,7 +695,16 @@ async def transcribe_audio_elevenlabs(file_path: str, language: str = "uz") -> O
                 language_code=language_code
             )
             
-            return result.text.strip() if hasattr(result, 'text') else str(result).strip()
+            raw_text = result.text.strip() if hasattr(result, 'text') else str(result).strip()
+            
+            if not raw_text:
+                return None
+            
+            logger.info(f"ElevenLabs raw transcription (lang={language_code}): '{raw_text}'")
+            
+            # Normalize: fix Cyrillic/Turkish/Kazakh → clean Uzbek Latin or Russian
+            normalized = await normalize_transcription(raw_text)
+            return normalized
     except Exception as e:
         logger.error(f"ElevenLabs transcription error: {e}")
         return None
