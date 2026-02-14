@@ -110,9 +110,11 @@ struct StopLeviAlarmIntent: LiveActivityIntent {
             
             for uuid in storedUUIDs {
                 if !stillActiveUUIDs.contains(uuid), let meta = store.get(uuid: uuid) {
-                    // This alarm was stopped — cancel pre-scheduled fallback, schedule fresh follow-up
+                    // This alarm was stopped — cancel backup notification + pre-scheduled fallback
                     let followUpId = String(meta.reminderId + FollowUpScheduler.FOLLOW_UP_ID_OFFSET)
-                    UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [followUpId])
+                    let backupId = String(meta.reminderId + 3000000)
+                    UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [followUpId, backupId])
+                    UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [backupId])
                     
                     FollowUpScheduler.shared.scheduleFollowUp(
                         reminderId: meta.reminderId,
@@ -312,9 +314,11 @@ class LeviAlarmKitPlugin: CAPPlugin {
             } catch {
                 print("⚠️ Cancel alarm error (may already be gone): \(error)")
             }
-            // Also cancel pre-scheduled follow-up
+            // Also cancel backup notification and pre-scheduled follow-up
+            let backupId = String(reminderId + 3000000)
             let followUpId = String(reminderId + FollowUpScheduler.FOLLOW_UP_ID_OFFSET)
-            UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [followUpId])
+            UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [followUpId, backupId])
+            UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [backupId])
             AlarmMetadataStore.shared.remove(uuid: alarmUUID.uuidString)
             call.resolve(["success": true])
             return
@@ -365,6 +369,10 @@ class LeviAlarmKitPlugin: CAPPlugin {
             } catch {
                 print("⚠️ Stop alarm error: \(error)")
             }
+            // Cancel backup notification since alarm was stopped via AlarmKit
+            let backupId = String(reminderId + 3000000)
+            UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [backupId])
+            UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [backupId])
             call.resolve(["success": true])
             return
         }
@@ -428,6 +436,11 @@ class LeviAlarmKitPlugin: CAPPlugin {
         
         print("✅ AlarmKit alarm scheduled: ID=\(alarm.id), state=\(alarm.state), fire=\(fireDate)")
         
+        // Schedule backup notification 3 seconds AFTER alarm time
+        // On iOS 26.1 (unlocked), AlarmKit may not show full-screen alarm
+        // StopLeviAlarmIntent cancels this when AlarmKit fires properly
+        self.scheduleBackupNotification(reminderId: reminderId, body: body, fireDate: fireDate.addingTimeInterval(3))
+        
         // Pre-schedule fallback follow-up at alarm_time + 25 minutes
         // StopLeviAlarmIntent will cancel this and schedule a fresh one from stop time
         let followUpDelay = fireDate.timeIntervalSinceNow + (25 * 60)
@@ -441,4 +454,37 @@ class LeviAlarmKitPlugin: CAPPlugin {
         }
     }
     #endif
+    
+    // MARK: - Backup Notification (fires 3s after alarm for unlocked devices on iOS 26.1)
+    // StopLeviAlarmIntent cancels this when AlarmKit fires properly (no double sound)
+    
+    private func scheduleBackupNotification(reminderId: Int, body: String, fireDate: Date) {
+        let content = UNMutableNotificationContent()
+        content.title = "🔔 Eslatma"
+        content.body = body
+        content.sound = UNNotificationSound(named: UNNotificationSoundName("alarm.wav"))
+        content.categoryIdentifier = "LEVI_ALARM"
+        content.userInfo = [
+            "reminderId": reminderId,
+            "taskText": body,
+            "isFollowUp": false
+        ]
+        
+        if #available(iOS 15.0, *) {
+            content.interruptionLevel = .timeSensitive
+        }
+        
+        let backupId = reminderId + 3000000
+        let components = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute, .second], from: fireDate)
+        let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
+        let request = UNNotificationRequest(identifier: String(backupId), content: content, trigger: trigger)
+        
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error = error {
+                print("⚠️ Failed to schedule backup notification: \(error)")
+            } else {
+                print("✅ Backup notification scheduled 3s after alarm for: \(reminderId)")
+            }
+        }
+    }
 }
