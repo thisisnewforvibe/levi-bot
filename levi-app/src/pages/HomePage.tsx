@@ -241,7 +241,7 @@ export default function HomePage() {
       duration: '00:00',
       date: dateText,
       time: scheduledDate.toLocaleTimeString('uz-UZ', { hour: '2-digit', minute: '2-digit' }),
-      timestamp: scheduledDate.getTime(),
+      timestamp: new Date(r.created_at).getTime(),
       isToday,
       isDone: r.status === 'done',
     }
@@ -351,7 +351,7 @@ export default function HomePage() {
     return true
   })
 
-  // Sort: active first, then by newest (most recent) at top
+  // Sort: active first, then by creation date (newest created at top)
   const sortedReminders = [...filteredReminders].sort((a, b) => {
     if (a.isDone !== b.isDone) return a.isDone ? 1 : -1
     return b.timestamp - a.timestamp
